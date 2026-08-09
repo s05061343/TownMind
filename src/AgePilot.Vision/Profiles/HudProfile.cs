@@ -18,6 +18,10 @@ public sealed class HudProfile
 
     public required Dictionary<HudField, NormalizedRect> Regions { get; init; }
 
+    public NormalizedRect? AgeRegion { get; init; }
+
+    public NormalizedRect? PauseMenuRegion { get; init; }
+
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(Id))
@@ -44,5 +48,8 @@ public sealed class HudProfile
 
             region.Validate();
         }
+
+        AgeRegion?.Validate();
+        PauseMenuRegion?.Validate();
     }
 }

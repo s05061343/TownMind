@@ -3,17 +3,22 @@ using OpenCvSharp;
 using Sdcb.PaddleInference;
 using Sdcb.PaddleOCR;
 using Sdcb.PaddleOCR.Models.Local;
+using System.Runtime.InteropServices;
 
 namespace AgePilot.Vision.Ocr;
 
+public enum OcrRecognitionModel { Chinese, English }
+
 public sealed class PaddleNumericOcrEngine : IOcrEngine, IDisposable
 {
+    private const double PreprocessScale = 2;
     private readonly PaddleOcrRecognizer _recognizer;
 
-    public PaddleNumericOcrEngine()
+    public PaddleNumericOcrEngine(OcrRecognitionModel model = OcrRecognitionModel.Chinese)
     {
+        Environment.SetEnvironmentVariable("GLOG_minloglevel", "2");
         _recognizer = new PaddleOcrRecognizer(
-            LocalRecognizationModel.EnglishV5,
+            model == OcrRecognitionModel.English ? LocalRecognizationModel.EnglishV5 : LocalRecognizationModel.ChineseV5,
             PaddleDevice.OneDnn(cacheCapacity: 10, cpuMathThreadCount: 1));
     }
 
@@ -76,14 +81,16 @@ public sealed class PaddleNumericOcrEngine : IOcrEngine, IDisposable
             throw new ArgumentException("BGRA frame size does not match its dimensions.", nameof(bgraPixels));
         }
 
+        var frameBytes = MemoryMarshal.TryGetArray(bgraPixels, out ArraySegment<byte> segment) &&
+                         segment.Offset == 0 && segment.Count == bgraPixels.Length
+            ? segment.Array!
+            : bgraPixels.ToArray();
         using var frame = Mat.FromPixelData(
             frameHeight,
             frameWidth,
             MatType.CV_8UC4,
-            bgraPixels.ToArray());
-        using var bgr = new Mat();
-        Cv2.CvtColor(frame, bgr, ColorConversionCodes.BGRA2BGR);
-        return Recognize(bgr, regions);
+            frameBytes);
+        return Recognize(frame, regions);
     }
 
     private IReadOnlyList<OcrResult> Recognize(Mat image, IReadOnlyList<PixelRect> regions)
@@ -100,7 +107,16 @@ public sealed class PaddleNumericOcrEngine : IOcrEngine, IDisposable
                     image,
                     new Rect(region.X, region.Y, region.Width, region.Height));
                 inputs[index] = new Mat();
-                Cv2.Resize(cropped, inputs[index], new Size(), 4, 4, InterpolationFlags.Cubic);
+                if (cropped.Channels() == 4)
+                {
+                    using var bgrCrop = new Mat();
+                    Cv2.CvtColor(cropped, bgrCrop, ColorConversionCodes.BGRA2BGR);
+                    Cv2.Resize(bgrCrop, inputs[index], new Size(), PreprocessScale, PreprocessScale, InterpolationFlags.Cubic);
+                }
+                else
+                {
+                    Cv2.Resize(cropped, inputs[index], new Size(), PreprocessScale, PreprocessScale, InterpolationFlags.Cubic);
+                }
             }
 
             var results = _recognizer.Run(inputs, batchSize: inputs.Length);
@@ -130,7 +146,7 @@ public sealed class PaddleNumericOcrEngine : IOcrEngine, IDisposable
             frame,
             new Rect(region.X, region.Y, region.Width, region.Height));
         using var enlarged = new Mat();
-        Cv2.Resize(cropped, enlarged, new Size(), 4, 4, InterpolationFlags.Cubic);
+        Cv2.Resize(cropped, enlarged, new Size(), PreprocessScale, PreprocessScale, InterpolationFlags.Cubic);
 
         var result = _recognizer.Run(enlarged);
         return new OcrResult(

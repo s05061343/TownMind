@@ -22,32 +22,43 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="🌾" FontSize="18" Margin="0,0,8,0"/>
+                    <TextBlock Text="◆" Foreground="#7FA66A" FontSize="15" Margin="0,2,8,0"/>
                     <TextBlock Text="AgePilot" Foreground="#C6A15B" FontSize="18" FontWeight="SemiBold"/>
                 </StackPanel>
-                <Button Grid.Column="1" Content="×" Width="26" Height="26" Click="OnClose"
-                        Foreground="#DDD8CC" Background="Transparent" BorderThickness="0" FontSize="18"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="ClickThroughButton" Content="◎" Width="26" Height="26" Click="OnToggleClickThrough"
+                            ToolTip="切換滑鼠穿透（Ctrl+Shift+C）"
+                            Foreground="#DDD8CC" Background="Transparent" BorderThickness="0" FontSize="15"/>
+                    <Button Content="×" Width="26" Height="26" Click="OnClose"
+                            Foreground="#DDD8CC" Background="Transparent" BorderThickness="0" FontSize="18"/>
+                </StackPanel>
             </Grid>
 
             <TextBlock x:Name="StatusText" Grid.Row="1" Text="正在初始化本機 OCR…"
                        Foreground="#9FA695" Margin="0,8,0,8"/>
 
             <UniformGrid Grid.Row="2" Columns="5" Margin="0,0,0,12">
-                <TextBlock x:Name="WoodText" Text="🪵 —" Foreground="#EEE9DD"/>
-                <TextBlock x:Name="FoodText" Text="🍖 —" Foreground="#EEE9DD"/>
-                <TextBlock x:Name="GoldText" Text="🪙 —" Foreground="#EEE9DD"/>
-                <TextBlock x:Name="StoneText" Text="🪨 —" Foreground="#EEE9DD"/>
-                <TextBlock x:Name="PopulationText" Text="👤 —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="WoodText" Text="W —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="FoodText" Text="F —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="GoldText" Text="G —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="StoneText" Text="S —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="PopulationText" Text="P —" Foreground="#EEE9DD"/>
             </UniformGrid>
 
             <Border Grid.Row="3" Background="#20241D" CornerRadius="6" Padding="10">
-                <StackPanel>
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid Grid.Row="0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="下一步" Foreground="#7FA66A" FontWeight="SemiBold"/>
+                    <Button x:Name="DismissButton" Grid.Column="1" Content="略過" Click="OnDismissAdvice" Visibility="Collapsed"
+                            Padding="8,2" Background="Transparent" Foreground="#9FA695" BorderBrush="#42483D"/>
+                    </Grid>
                     <TextBlock x:Name="AdviceTitle" Text="等待可靠的遊戲狀態…"
-                               Foreground="#F2EDE1" FontSize="15" FontWeight="SemiBold" Margin="0,5,0,3"/>
+                               Grid.Row="1" Foreground="#F2EDE1" FontSize="15" FontWeight="SemiBold" Margin="0,5,0,3"/>
                     <TextBlock x:Name="AdviceDescription" Text="資料不足時，AgePilot 會保持安靜。"
-                               Foreground="#C9C5BA" TextWrapping="Wrap"/>
-                </StackPanel>
+                               Grid.Row="2" Foreground="#C9C5BA" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="OtherAdviceText" Grid.Row="3" Foreground="#9FA695" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                </Grid>
             </Border>
         </Grid>
     </Border>

@@ -5,5 +5,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AgePilot.Core\AgePilot.Core.csproj" />
     <ProjectReference Include="..\..\src\AgePilot.Vision\AgePilot.Vision.csproj" />
+    <ProjectReference Include="..\..\src\AgePilot.Infrastructure\AgePilot.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

@@ -5,6 +5,8 @@
   "calibrationWidth": 2560,
   "calibrationHeight": 1440,
   "hudScalePercent": 50,
+  "ageRegion": { "x": 0.35156250, "y": 0.00555556, "width": 0.08203125, "height": 0.03333333 },
+  "pauseMenuRegion": { "x": 0.47265625, "y": 0.31527778, "width": 0.05859375, "height": 0.02777778 },
   "regions": {
     "wood":       { "x": 0.02578125, "y": 0.01041667, "width": 0.02031250, "height": 0.02500000 },
     "food":       { "x": 0.08007813, "y": 0.01041667, "width": 0.02031250, "height": 0.02500000 },

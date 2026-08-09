@@ -11,10 +11,19 @@
 - [x] PopulationCritical、PopulationLow、WoodOverflow Farmer Rules。
 - [x] Priority、Cooldown 與最多三條建議。
 - [x] WPF Compact Overlay 與背景取消。
+- [x] Dashboard、JSON 設定與 Overlay UI 啟停。
+- [x] SQLite Session、五秒 Snapshot、Recommendation events 與最近對局檢視。
+- [x] Chinese V5 時代 OCR（黑暗／封建／城堡／帝王）。
+- [x] Farmer Rules：人口低、人口滿、木材偏高、升城採金、可升城、可升帝王、資源嚴重溢出。
+- [x] Active recommendation、次要建議與 Dismiss-until-resolved lifecycle。
 - [x] AOE2 執行中的全螢幕 Capture 實機驗證。
+- [x] 四張 Screenshot manifest 與自動 OCR ground-truth 回歸（正常、Overlay、零值、暫停）。
+- [x] Self-contained win-x64 Portable package、SHA-256 與診斷匯出。
+- [x] `GameNotFound / Detected / Loading / Active / Paused / Unavailable / Ended` 狀態與暫停 fail-closed。
+- [x] 變更 ROI 快取、零拷貝 Frame bridge 與可重跑 Vision／Replay JSON 報告。
 - [ ] 多樣本 Vision Gate 準確率驗收。
 
-目前狀態是 **Playable Prototype 已通過首次實機串接**，不是 Public Alpha。GDI 已在目前校正環境取得正確畫面；其他顯示模式仍需個別驗證。
+目前狀態是 **Public Alpha 軟體功能已完成，Vision／實機 Gate 仍在累積證據**。GDI 已在目前校正環境取得正確畫面；其他顯示模式仍需個別驗證。
 
 ## 1. 目的
 
@@ -79,16 +88,13 @@ Phase 0 只回答一個問題：AgePilot 能否從 AOE2 DE 畫面可靠取得 Ti
 - Windows GDI 單幀擷取 Spike 與 BMP 輸出；此實作只用於驗證，正式 Capture backend 仍需比較 Windows Graphics Capture。
 - ROI、Profile 與數字解析的自動測試。
 
-## 7. 尚未完成
+## 7. 尚未完成的驗收證據
 
-- PaddleOCR 已選定；仍需完成實際 ROI 整合與 Vision Gate 測量。
-- `ocr-image` 已提供固定截圖的 ROI OCR；仍需累積樣本與進行 Vision Gate 測量。
-- `scan-live` 會尋找 AOE2、擷取單幀並直接輸出五個 HUD OCR 結果。
-- `overlay` 以 2 FPS 執行持續擷取與 OCR，經 Temporal GameState 後顯示 Farmer Mode 建議。
 - Windows Graphics Capture 實際串接。
 - HUD Anchor 圖示辨識。
-- 多張遊戲樣本與 metadata ground truth。
+- 封建、城堡、帝王及更多資源位數的 ground truth。
 - Vision Gate 準確率測量。
+- 五局完整實機無 Crash、錯誤提示與 FPS 影響紀錄。
 
 以上項目未完成前，不宣稱 OCR 或任意解析度正式支援。
 
@@ -103,7 +109,7 @@ Phase 0 只回答一個問題：AgePilot 能否從 AOE2 DE 畫面可靠取得 Ti
 
 每張遊戲截圖必須附人工標註 metadata。
 
-## 9. 第一筆 Ground Truth
+## 9. Ground Truth 與目前基準
 
 `Snipaste_2026-08-09_16-29-15.jpg` 的人工標註為：
 
@@ -122,3 +128,19 @@ Population  4 / 5
 第二筆實機畫面確認 Food `0` 的 OCR confidence 約 50.5%。45%～70% 的候選值必須連續兩幀完全相同才確認，原始 confidence 保留；低於 70% 的資料不得驅動高信心 Coach Rule。
 
 Cooldown 只適用於未來的聲音、Toast 或重新通知，不得隱藏仍然成立的 Overlay active recommendation。
+
+Dismiss 只在同一段 active condition 期間隱藏建議；條件解除後清除 Dismiss 狀態，未來再次成立時重新提示。SQLite RecommendationEvent 在 inactive → active 時寫入一次，不隨畫面更新重複寫入。
+
+截至 2026-08-09，manifest 有四張 2560×1440／全螢幕／繁中／HUD 50% 黑暗時代樣本，其中包含正常遊戲、Overlay、食物為零與主選單暫停畫面。四張的六個必要 HUD 欄位共 24 個 ground-truth 值全部完全相符：
+
+```text
+FieldExactAccuracy  100% (24/24)
+FrameExactAccuracy  100% (4/4)
+HighConfidenceErrorRate  0% (0/N)
+FalseRecommendationRate  0%
+RecommendationExactRate  100% (4/4)
+```
+
+這是小樣本基準，不足以宣稱第 10.3 節統計 Gate 通過；回歸測試會確保後續變更不得破壞這四張已知案例。
+
+200 幀最大吞吐 Replay 為 200/200、0 failure，50 個暫停幀全部停止建議。此壓力模式的 OCR 平均／p95 為 571.6／666.8 ms、CPU 48.07%、Peak Working Set 508.3 MB；因為它不模擬遊戲中的等待週期且同時常駐四張完整 BGRA 測試影格，只作為最壞吞吐與穩定性證據，不能代替實機效能 Gate。完整紀錄見 `business/verification-2026-08-09.md`。

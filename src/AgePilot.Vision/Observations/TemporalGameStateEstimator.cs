@@ -29,6 +29,7 @@ public sealed class TemporalGameStateEstimator(
 
         return new GameState
         {
+            Age = result.Age,
             Wood = values[HudField.Wood],
             Food = values[HudField.Food],
             Gold = values[HudField.Gold],

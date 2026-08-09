@@ -6,6 +6,8 @@ public sealed class GameState
 {
     public TimeSpan? GameTime { get; init; }
 
+    public GameAge? Age { get; init; }
+
     public ObservedValue<int>? Food { get; init; }
 
     public ObservedValue<int>? Wood { get; init; }

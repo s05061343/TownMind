@@ -6,8 +6,12 @@
   <ItemGroup>
     <ProjectReference Include="..\AgePilot.Core\AgePilot.Core.csproj" />
     <ProjectReference Include="..\AgePilot.Vision\AgePilot.Vision.csproj" />
+    <ProjectReference Include="..\AgePilot.Infrastructure\AgePilot.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\config\hud\*.json" Link="config\hud\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\doc\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

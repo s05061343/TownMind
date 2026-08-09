@@ -9,7 +9,7 @@
 **主要技術：** C# / .NET 8 / WPF  
 **核心原則：** Calm、Local、Read-only、Player-first
 
-> **目前進度（2026-08-09）：** Playable Prototype 已具備持續 OCR、Temporal GameState、三條 Farmer Rules 與 WPF Compact Overlay，並通過 2560×1440 全螢幕首次實機 Capture；仍待多樣本 Vision Gate 驗收。詳細狀態見 `doc/business/vision-spike.md`。
+> **目前進度（2026-08-09）：** Public Alpha 軟體範圍已實作並產生 self-contained Portable package；四張實機截圖的 24 個必要欄位回歸為 24/24。多時代 Vision 樣本、五局長時間測試、效能與全新 Windows 驗證仍是正式對外發佈前的人工 Gate。詳細狀態見 `doc/business/public-alpha-release.md`。
 
 ---
 
@@ -804,34 +804,34 @@ LLM 永遠不應成為即時核心決策的必要依賴。
 
 ### P0：Vision Gate
 
-- [ ] 偵測 AOE2 視窗與生命週期。
-- [ ] 擷取固定支援環境畫面。
-- [ ] 定義 HUD Profile 與 ROI。
-- [ ] 辨識四項資源與人口。
-- [ ] 建立 Confidence 與 validation pipeline。
-- [ ] 建立 screenshot metadata 格式。
-- [ ] 建立 Vision regression tests。
+- [x] 偵測 AOE2 視窗與生命週期。
+- [x] 擷取固定支援環境畫面。
+- [x] 定義 HUD Profile 與 ROI。
+- [x] 辨識四項資源與人口。
+- [x] 建立 Confidence 與 validation pipeline。
+- [x] 建立 screenshot metadata 格式。
+- [x] 建立 Vision regression tests。
 - [ ] 測量 Vision Gate 指標。
 
 ### P1：Playable Prototype
 
-- [ ] 建立 Observation 與 GameState。
-- [ ] 建立短期時間序列 History。
-- [ ] 建立 Rule requirements 與 Rule engine。
-- [ ] 實作第一批 3～5 條規則。
-- [ ] 實作 cooldown、suppression 與 lifecycle。
-- [ ] 建立 Compact Overlay。
-- [ ] 建立 Vision / Rule Debug View。
+- [x] 建立 Observation 與 GameState。
+- [x] 建立短期時間序列 History。
+- [x] 建立 Rule requirements 與 Rule engine。
+- [x] 實作第一批 3～5 條規則。
+- [x] 實作 cooldown、suppression 與 lifecycle。
+- [x] 建立 Compact Overlay。
+- [x] 建立 Vision / Rule Debug View。
 - [ ] 執行五局完整實機測試。
 
 ### P2：Alpha
 
-- [ ] Dashboard 與設定頁。
-- [ ] Session persistence 與 SQLite。
-- [ ] 1440p Profile 驗證。
-- [ ] 打包與安裝測試。
-- [ ] Privacy、Disclaimer 與 README。
-- [ ] 建立匿名問題回報所需的診斷匯出。
+- [x] Dashboard 與設定頁。
+- [x] Session persistence 與 SQLite。
+- [x] 1440p Profile 基本實機驗證（完整 Vision Gate 另列）。
+- [x] Self-contained Portable 打包與本機啟動測試。
+- [x] Privacy、Disclaimer 與 README。
+- [x] 建立匿名問題回報所需的診斷匯出。
 
 ### P3：後續研究
 

@@ -20,6 +20,8 @@
         "population": 4,
         "populationCap": 5
       },
+      "paused": false,
+      "expectedRecommendations": ["R001"],
       "notes": [
         "Dark Age tutorial scene.",
         "A third-party performance overlay is visible in the upper-right corner and does not overlap the resource ROIs."
@@ -44,10 +46,32 @@
         "population": 4,
         "populationCap": 5
       },
+      "paused": false,
+      "expectedRecommendations": [],
       "notes": [
         "Live GDI capture and WPF overlay confirmed by the user.",
         "Food zero OCR confidence is approximately 50.5% and requires temporal confirmation."
       ]
+    },
+    {
+      "id": "zh-tw-2560x1440-dark-age-live-003",
+      "image": "../../doc/Snipaste_2026-08-09_18-54-29.jpg",
+      "profile": "../../config/hud/aoe2de-zh-tw-2560x1440-50.json",
+      "environment": { "width": 2560, "height": 1440, "displayMode": "fullscreen", "language": "zh-TW", "hudScalePercent": 50 },
+      "groundTruth": { "age": "Dark", "wood": 125, "food": 149, "gold": 100, "stone": 200, "population": 9, "populationCap": 20 },
+      "paused": false,
+      "expectedRecommendations": [],
+      "notes": ["Normal live match with the AgePilot overlay visible outside all OCR regions."]
+    },
+    {
+      "id": "zh-tw-2560x1440-dark-age-paused-004",
+      "image": "../../doc/Snipaste_2026-08-09_18-54-40.jpg",
+      "profile": "../../config/hud/aoe2de-zh-tw-2560x1440-50.json",
+      "environment": { "width": 2560, "height": 1440, "displayMode": "fullscreen", "language": "zh-TW", "hudScalePercent": 50 },
+      "groundTruth": { "age": "Dark", "wood": 135, "food": 159, "gold": 100, "stone": 200, "population": 9, "populationCap": 20 },
+      "paused": true,
+      "expectedRecommendations": [],
+      "notes": ["Paused match with the main menu dimming layer and AgePilot overlay visible."]
     }
   ]
 }
