@@ -1,0 +1,15 @@
+{
+  "id": "aoe2de-zh-tw-2560x1440-50",
+  "language": "zh-TW",
+  "displayMode": "fullscreen",
+  "calibrationWidth": 2560,
+  "calibrationHeight": 1440,
+  "hudScalePercent": 50,
+  "regions": {
+    "wood":       { "x": 0.02578125, "y": 0.01041667, "width": 0.02031250, "height": 0.02500000 },
+    "food":       { "x": 0.08007813, "y": 0.01041667, "width": 0.02031250, "height": 0.02500000 },
+    "gold":       { "x": 0.13203125, "y": 0.01041667, "width": 0.02031250, "height": 0.02500000 },
+    "stone":      { "x": 0.18437500, "y": 0.01041667, "width": 0.02031250, "height": 0.02500000 },
+    "population": { "x": 0.23750000, "y": 0.01041667, "width": 0.02734375, "height": 0.02500000 }
+  }
+}

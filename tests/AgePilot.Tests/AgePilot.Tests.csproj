@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AgePilot.Core\AgePilot.Core.csproj" />
+    <ProjectReference Include="..\..\src\AgePilot.Vision\AgePilot.Vision.csproj" />
+  </ItemGroup>
+</Project>

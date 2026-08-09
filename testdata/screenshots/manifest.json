@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "samples": [
+    {
+      "id": "zh-tw-2560x1440-dark-age-001",
+      "image": "../../doc/Snipaste_2026-08-09_16-29-15.jpg",
+      "profile": "../../config/hud/aoe2de-zh-tw-2560x1440-50.json",
+      "environment": {
+        "width": 2560,
+        "height": 1440,
+        "displayMode": "fullscreen",
+        "language": "zh-TW",
+        "hudScalePercent": 50
+      },
+      "groundTruth": {
+        "wood": 200,
+        "food": 200,
+        "gold": 100,
+        "stone": 200,
+        "population": 4,
+        "populationCap": 5
+      },
+      "notes": [
+        "Dark Age tutorial scene.",
+        "A third-party performance overlay is visible in the upper-right corner and does not overlap the resource ROIs."
+      ]
+    }
+  ]
+}

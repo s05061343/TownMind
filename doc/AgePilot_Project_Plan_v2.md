@@ -265,15 +265,15 @@ Window Detection
 
 ### 9.2 第一版限制
 
-Vision Gate 先固定：
+Vision Gate 的已確認校正環境為：
 
-- 1920×1080。
-- UI Scale 100%。
-- 一種已確認的顯示模式。
+- 2560×1440。
+- 全螢幕。
+- 繁體中文。
+- HUD Scale 50%。
 - 手動定義 ROI。
-- 已知的遊戲語言與 HUD 配置。
 
-2560×1440、其他 UI Scale、HDR、超寬螢幕與自動校正，只有在固定環境通過後才加入。
+ROI 使用 0～1 標準化座標，可隨輸入畫面大小等比例換算。這只代表相同 HUD 佈局下的幾何映射，不代表任意 HUD Scale 或 Layout 已受支援。其他 UI Scale、HDR、超寬螢幕與 Anchor 自動校正，只有在校正環境通過後才加入。
 
 ### 9.3 更新頻率初始值
 
@@ -719,8 +719,8 @@ GameEnded
 
 範圍：
 
-- 1080p 穩定支援。
-- 視驗證結果加入 1440p。
+- 1440p／HUD 50% 校正環境穩定支援。
+- 視驗證結果加入 1080p 或其他 HUD Scale。
 - 基本 Dashboard 與設定。
 - Session persistence 與 SQLite。
 - Installer 或 Portable package。
@@ -992,7 +992,8 @@ Auto Update、Stable/Beta channel 與 Telemetry 不屬於首個 Alpha 的必要�
 - Farmer Mode 為第一個 Profile。
 - Vision Gate 優先於產品 UI。
 - Prototype 不使用 SQLite。
-- 初始只保證一種固定顯示環境。
+- 初始校正環境為 2560×1440、全螢幕、繁中、HUD 50%。
+- 標準化 ROI 只保證相同 HUD 佈局的比例換算；任意配置需要 Anchor 校正證據。
 
 待驗證：
 

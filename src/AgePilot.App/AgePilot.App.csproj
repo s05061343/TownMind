@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AgePilot.Core\AgePilot.Core.csproj" />
+    <ProjectReference Include="..\AgePilot.Vision\AgePilot.Vision.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\config\hud\*.json" Link="config\hud\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
