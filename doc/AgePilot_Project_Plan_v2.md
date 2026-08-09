@@ -506,6 +506,7 @@ Balanced、Turtle 與 Custom Mode 都列入 Roadmap，不進入 Alpha 範圍。
 - 支援 Click-through。
 - 半透明。
 - 可立即關閉。
+- Dashboard 關閉／最小化與 Overlay 啟動後收至 System Tray；只有 Tray 選單可真正退出 App。
 
 ### 13.2 Playable Prototype 畫面
 

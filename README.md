@@ -34,6 +34,7 @@ Dashboard 可啟動 Overlay、保存設定並查看最近 Session。詳細說明
 - Farmer Mode 規則與可略過建議。
 - Compact Overlay、滑鼠穿透與全域快捷鍵。
 - Dashboard、JSON 設定與可停用的 SQLite Session history。
+- System Tray 常駐；關閉／最小化 Dashboard 或啟動 Overlay 時自動收至通知區。
 - 本機 Vision／Rule diagnostics，以及使用者主動觸發的匿名 JSON 匯出。
 - 可重跑的 Screenshot Vision、Replay 與 Live performance JSON 報告。
 

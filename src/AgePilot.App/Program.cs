@@ -133,7 +133,7 @@ static int RunOverlay(string profilePath)
     {
         try
         {
-            var application = new Application();
+            var application = new System.Windows.Application();
             application.Run(new OverlayWindow(ResolveInputPath(profilePath), sessionRepository: SqliteSessionRepository.CreateDefault(), logger: LocalJsonLineLogger.CreateDefault()));
         }
         catch (Exception exception)
@@ -223,8 +223,10 @@ static int RunDashboard()
     {
         try
         {
-            var application = new Application();
-            application.Run(new DashboardWindow(JsonSettingsStore.CreateDefault()));
+            var application = new System.Windows.Application();
+            var dashboard = new DashboardWindow(JsonSettingsStore.CreateDefault());
+            application.SessionEnding += (_, _) => dashboard.PrepareForSystemExit();
+            application.Run(dashboard);
         }
         catch (Exception exception) { failure = exception; }
     });

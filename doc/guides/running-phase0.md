@@ -17,6 +17,17 @@ dotnet run --no-build --project src\AgePilot.App
 
 Dashboard 可保存 HUD Profile、Overlay 透明度與掃描間隔，並直接啟動／停止 Overlay。設定儲存在 `%LocalAppData%\AgePilot\settings.json`。
 
+## System Tray 行為
+
+- 按 Dashboard 的關閉按鈕不會結束程式，而是隱藏到右下角通知區。
+- 最小化 Dashboard 也會隱藏到通知區，不留在工作列。
+- 啟動 Overlay 後 Dashboard 自動隱藏，監看與通知區圖示繼續運作。
+- 關閉 Overlay 只停止監看；AgePilot 仍留在通知區。
+- 雙擊通知區圖示可重新開啟 Dashboard。
+- 通知區右鍵選單可開啟 Dashboard、啟動／停止 Overlay。
+- 只有通知區右鍵選單的「結束 AgePilot」會真正退出程式。
+- Windows 登出或關機仍可正常結束，不會攔截系統關閉。
+
 對局歷史儲存在 `%LocalAppData%\AgePilot\agepilot.db`。Dashboard 顯示最近五局的時間、持續時間、Snapshot 數與建議數；AgePilot 不會把 Screenshot 寫入資料庫。
 
 「儲存本機對局紀錄」可隨時關閉。診斷匯出只有按下「匯出診斷」並選定檔案後才會建立 JSON；內容不含 Screenshot、按鍵內容或帳號名稱。
@@ -29,6 +40,8 @@ Dashboard 可保存 HUD Profile、Overlay 透明度與掃描間隔，並直接�
 2. 雙擊 `AgePilot.App.exe`。
 3. 保持預設 HUD Profile，啟動 AOE2 DE 並進入對局。
 4. 在 Dashboard 按「啟動 Overlay」。
+
+Overlay 啟動後 Dashboard 會自動收到通知區；不需要保持 Dashboard 視窗開啟。
 
 可攜版為 `win-x64` self-contained，不需要預先安裝 .NET。完整性可用同目錄 `.sha256` 檔驗證。
 

@@ -9,6 +9,9 @@ using Microsoft.Win32;
 using System.IO;
 using System.Text.Json;
 using AgePilot.Infrastructure.Diagnostics;
+using System.ComponentModel;
+using Forms = System.Windows.Forms;
+using Drawing = System.Drawing;
 
 namespace AgePilot.App;
 
@@ -19,16 +22,41 @@ public partial class DashboardWindow : Window
     private readonly SqliteSessionRepository _sessions = SqliteSessionRepository.CreateDefault();
     private AppSettings _settings;
     private OverlayWindow? _overlay;
+    private readonly Forms.NotifyIcon _trayIcon;
+    private readonly Forms.ToolStripMenuItem _trayOverlayItem;
+    private bool _allowExit;
 
     public DashboardWindow(JsonSettingsStore store)
     {
         InitializeComponent();
         _store = store;
+        _trayOverlayItem = new Forms.ToolStripMenuItem("啟動 Overlay", null, (_, _) => Dispatcher.Invoke(ToggleOverlay));
+        var trayMenu = new Forms.ContextMenuStrip();
+        trayMenu.Items.Add(new Forms.ToolStripMenuItem("開啟 Dashboard", null, (_, _) => Dispatcher.Invoke(ShowDashboard)));
+        trayMenu.Items.Add(_trayOverlayItem);
+        trayMenu.Items.Add(new Forms.ToolStripSeparator());
+        trayMenu.Items.Add(new Forms.ToolStripMenuItem("結束 AgePilot", null, (_, _) => Dispatcher.Invoke(ExitApplication)));
+        _trayIcon = new Forms.NotifyIcon
+        {
+            Icon = Drawing.SystemIcons.Application,
+            Text = "AgePilot",
+            ContextMenuStrip = trayMenu,
+            Visible = true,
+        };
+        _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowDashboard);
         _settings = LoadSafely();
         ApplySettings();
         _timer.Tick += (_, _) => RefreshGame();
         Loaded += async (_, _) => { RefreshGame(); _timer.Start(); await RefreshHistoryAsync(); };
-        Closed += (_, _) => { _timer.Stop(); _overlay?.Close(); };
+        Closing += OnWindowClosing;
+        StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) HideToTray(); };
+        Closed += (_, _) =>
+        {
+            _timer.Stop();
+            _overlay?.Close();
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+        };
     }
 
     private AppSettings LoadSafely()
@@ -52,7 +80,7 @@ public partial class DashboardWindow : Window
     {
         var game = new WindowsGameWindowLocator().Find();
         GameStatusText.Text = game is null ? "等待 AOE2 DE" : $"已連線：{game.Title}";
-        GameStatusDot.Fill = new SolidColorBrush(game is null ? Color.FromRgb(211, 162, 76) : Color.FromRgb(127, 166, 106));
+        GameStatusDot.Fill = new SolidColorBrush(game is null ? System.Windows.Media.Color.FromRgb(211, 162, 76) : System.Windows.Media.Color.FromRgb(127, 166, 106));
     }
 
     private void OnSaveSettings(object sender, RoutedEventArgs e)
@@ -62,6 +90,9 @@ public partial class DashboardWindow : Window
     }
 
     private void OnToggleOverlay(object sender, RoutedEventArgs e)
+        => ToggleOverlay();
+
+    private void ToggleOverlay()
     {
         if (_overlay is not null) { _overlay.Close(); return; }
         try
@@ -76,12 +107,54 @@ public partial class DashboardWindow : Window
                 _settings.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null)
             { Opacity = _settings.OverlayOpacity, Owner = this };
             _overlay.CoachUpdated += OnCoachUpdated;
-            _overlay.Closed += async (_, _) => { _overlay = null; OverlayButton.Content = "啟動 Overlay"; await RefreshHistoryAsync(); };
+            _overlay.Closed += async (_, _) =>
+            {
+                _overlay = null;
+                OverlayButton.Content = "啟動 Overlay";
+                _trayOverlayItem.Text = "啟動 Overlay";
+                await RefreshHistoryAsync();
+            };
             _overlay.Show();
             OverlayButton.Content = "停止 Overlay";
+            _trayOverlayItem.Text = "停止 Overlay";
+            HideToTray();
         }
         catch (Exception exception) { MessageText.Text = $"無法啟動 Overlay：{exception.Message}"; }
     }
+
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (_allowExit) return;
+        e.Cancel = true;
+        HideToTray();
+    }
+
+    private void HideToTray()
+    {
+        ShowInTaskbar = false;
+        Hide();
+        WindowState = WindowState.Normal;
+    }
+
+    private void ShowDashboard()
+    {
+        ShowInTaskbar = true;
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+
+    private void ExitApplication()
+    {
+        PrepareForSystemExit();
+        _overlay?.Close();
+        Close();
+    }
+
+    internal void PrepareForSystemExit() => _allowExit = true;
 
     private AppSettings ReadSettings()
     {
@@ -106,7 +179,7 @@ public partial class DashboardWindow : Window
         {
             await _sessions.InitializeAsync();
             var sessions = await _sessions.GetRecentSessionsAsync(20);
-            var dialog = new SaveFileDialog
+            var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Title = "匯出 AgePilot 診斷資料",
                 Filter = "JSON 檔案 (*.json)|*.json",

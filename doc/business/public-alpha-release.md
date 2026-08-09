@@ -5,6 +5,7 @@
 - [x] 本機持續 Capture、OCR、Temporal GameState 與 fail-closed。
 - [x] Farmer Mode 確定性規則、priority、dismiss-until-resolved。
 - [x] Compact Overlay、拖曳、關閉、滑鼠穿透與快捷鍵。
+- [x] System Tray 常駐、關閉／最小化隱藏、Overlay 啟動後自動收合及 Tray-only Exit。
 - [x] Dashboard 設定、遊戲連線、Live diagnostics 與最近對局。
 - [x] 可停用的 SQLite Session／Snapshot／Recommendation event。
 - [x] 使用者主動 JSON 診斷匯出；不含 Screenshot 或帳號資訊。
@@ -22,7 +23,7 @@ artifacts/packages/AgePilot-public-alpha-win-x64.zip
 artifacts/packages/AgePilot-public-alpha-win-x64.zip.sha256
 ```
 
-目前產物 SHA-256：`7956ECE990754AAD6C42E9FCF0A5F749EB5D12CE2E93988435858B1780EAED6B`。
+目前產物 SHA-256：`159BA5477F58BB004B621B9AE8EAA1EAEF5569D1466F0A31CEFF9FC64BF6F664`。
 
 建置命令：
 

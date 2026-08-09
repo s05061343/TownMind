@@ -48,12 +48,15 @@ Replay 刻意不等待、持續以最大吞吐處理，且記憶體中同時保�
 - 使用者提供的主選單暫停畫面可辨識，暫停時不產生建議。
 - 發佈 ZIP 解壓後可執行 OCR，Dashboard 視窗成功開啟。
 - 可攜版包含 README、Privacy 與 HUD Profile。
+- GUI smoke：關閉 Dashboard 後程序仍存活且視窗從工作列消失。
+- GUI smoke：最小化 Dashboard 後程序仍存活且視窗從工作列消失。
+- GUI smoke：啟動 Overlay 後 Dashboard 為 off-screen，AgePilot 程序與 Overlay 持續運作。
 
 最終可攜版：
 
 ```text
 artifacts/packages/AgePilot-public-alpha-win-x64.zip
-SHA-256 7956ECE990754AAD6C42E9FCF0A5F749EB5D12CE2E93988435858B1780EAED6B
+SHA-256 159BA5477F58BB004B621B9AE8EAA1EAEF5569D1466F0A31CEFF9FC64BF6F664
 ```
 
 ## 尚缺的外部證據
