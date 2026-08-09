@@ -8,6 +8,8 @@ using AgePilot.Vision.Observations;
 using AgePilot.Vision.Ocr;
 using AgePilot.Vision.Profiles;
 using AgePilot.Infrastructure.Diagnostics;
+using AgePilot.Core.Automation;
+using AgePilot.Vision.World;
 
 namespace AgePilot.App;
 
@@ -34,6 +36,7 @@ public sealed class LiveCoachService(
     });
     private readonly RecommendationCoordinator _recommendationCoordinator = new();
     private readonly GameLifecycleTracker _lifecycle = new();
+    private readonly GenericWorldAnalyzer _worldAnalyzer = new();
     private readonly HudProfile _profile = HudProfileLoader.Load(profilePath);
     private readonly ISessionRepository? _sessions = sessionRepository;
     private readonly HashSet<string> _activeRecommendationIds = [];
@@ -88,6 +91,7 @@ public sealed class LiveCoachService(
                             continue;
                         }
                         var state = _estimator.Update(raw, frame.CapturedAt);
+                        var world = _worldAnalyzer.Analyze(frame.BgraPixels.ToArray(), frame.Width, frame.Height);
                         _history.Add(state, frame.CapturedAt);
                         var activeRecommendations = _coach.Evaluate(state, _history);
                         var visibleRecommendations = _recommendationCoordinator.Apply(activeRecommendations);
@@ -101,7 +105,7 @@ public sealed class LiveCoachService(
                             : $"監測中 · {FormatAge(state.Age)}";
                         await onUpdate(new LiveCoachUpdate(true, status, lifecycle, state,
                             lifecycle == GameLifecycleState.GameActive ? visibleRecommendations : [],
-                            health.Confidence, health.UnavailableFields, DateTimeOffset.UtcNow - cycleStartedAt));
+                            health.Confidence, health.UnavailableFields, DateTimeOffset.UtcNow - cycleStartedAt, world));
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -214,7 +218,8 @@ public sealed record LiveCoachUpdate(
     IReadOnlyList<Recommendation> Recommendations,
     double VisionConfidence,
     int UnavailableFields,
-    TimeSpan AnalysisLatency)
+    TimeSpan AnalysisLatency,
+    WorldObservation? World = null)
 {
     public static LiveCoachUpdate Disconnected(GameLifecycleState lifecycle, string status) =>
         new(false, status, lifecycle, null, [], 0, 6, TimeSpan.Zero);

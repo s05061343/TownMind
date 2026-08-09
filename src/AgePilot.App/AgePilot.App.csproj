@@ -1,8 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>..\..\assets\branding\agepilot.ico</ApplicationIcon>
+    <AssemblyTitle>AgePilot</AssemblyTitle>
+    <Product>AgePilot</Product>
+    <Description>A calm companion for Age of Empires II.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AgePilot.Core\AgePilot.Core.csproj" />
@@ -10,6 +14,8 @@
     <ProjectReference Include="..\AgePilot.Infrastructure\AgePilot.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Resource Include="..\..\assets\branding\agepilot-logo-512.png" Link="Assets\Branding\agepilot-logo.png" />
+    <Resource Include="..\..\assets\branding\agepilot.ico" Link="Assets\Branding\agepilot.ico" />
     <None Include="..\..\config\hud\*.json" Link="config\hud\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />

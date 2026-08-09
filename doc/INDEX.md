@@ -15,7 +15,10 @@
 | [decisions/0001-normalized-roi.md](decisions/0001-normalized-roi.md) | 標準化 ROI 與 Anchor 校正的架構決策 | 修改 HUD 定位或解析度支援時 |
 | [decisions/0002-local-paddleocr.md](decisions/0002-local-paddleocr.md) | 本機 PaddleOCR runtime、模型與替換邊界 | OCR 引擎、套件或部署工作 |
 | [decisions/0003-sqlite-session-persistence.md](decisions/0003-sqlite-session-persistence.md) | Session、Snapshot、Recommendation event 與隱私邊界 | 歷史資料、報告或 DB schema 工作 |
+| [decisions/0004-user-controlled-input-automation.md](decisions/0004-user-controlled-input-automation.md) | 使用者控制的 SendInput、自動模式與停止邊界 | 修改自動操作、熱鍵或遊戲輸入時 |
+| [decisions/0005-generic-economic-agent.md](decisions/0005-generic-economic-agent.md) | 通用世界辨識、21 人經濟規劃、鍵鼠執行與確認閉環 | 修改資源辨識、建築、升級或經濟狀態機時 |
 | [guides/running-phase0.md](guides/running-phase0.md) | 建置、參考圖 OCR、即時單幀掃描與已知限制 | 執行或驗證目前程式時 |
+| [brand/branding.md](brand/branding.md) | 老鷹徽章、色彩、使用規則與資產重建方式 | 修改 UI、封裝、網站或發佈素材時 |
 
 ## 參考資料
 

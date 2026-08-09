@@ -10,20 +10,20 @@
 
 Age of Empires Code of Conduct 要求公平遊玩，並把刻意破壞對局或 tampering 列為違反公平精神的例子。Microsoft Services Agreement 禁止繞過技術保護、逆向工程、未授權存取，以及啟用 cheating／tampering 的未授權軟硬體；官方保留偵測與阻止此類工具的權利。
 
-上述公開文件沒有明文列出「只讀螢幕 OCR 教練 Overlay」是否允許，也沒有提供可據以宣稱 AgePilot 已獲官方核准的條款。因此目前只能確認 AgePilot 的設計降低了風險，不能把技術上的只讀邊界解讀為官方授權。
+上述公開文件沒有提供可據以宣稱 AgePilot OCR Overlay 或 `SendInput` 生產序列已獲官方核准的條款。專案負責人已明確決定私人對 AI 使用情境不納入程式偵測或限制；這項產品決策不代表官方授權。
 
 ## 必須維持的產品邊界
 
 - 只使用作業系統提供的畫面擷取；不注入遊戲程序。
 - 不讀取遊戲記憶體、封包、受保護資料或未公開 API。
-- 不發送滑鼠、鍵盤或其他遊戲輸入。
-- 不提供自動化操作、敵方隱藏資訊、地圖全開或繞過 Fog of War。
+- 自動輸入僅使用 Windows `SendInput`，由使用者明確開啟並可立即停止。
+- 不提供敵方隱藏資訊、地圖全開或繞過 Fog of War。
 - 不修改遊戲檔案、反作弊、網路流量或 Xbox 服務。
 - 不宣稱 Microsoft、Xbox、World's Edge 或 Forgotten Empires 核准／背書。
 
 ## 發佈限制
 
-在取得官方 Support 對此類只讀 Overlay 的明確答覆前：
+在取得官方 Support 對此類 Overlay／自動輸入的明確答覆前：
 
 - Public Alpha 應標示為非官方、使用者自負風險。
 - 建議限定單人／對 AI／非排名情境測試。

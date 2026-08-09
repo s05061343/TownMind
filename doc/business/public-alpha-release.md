@@ -6,12 +6,13 @@
 - [x] Farmer Mode 確定性規則、priority、dismiss-until-resolved。
 - [x] Compact Overlay、拖曳、關閉、滑鼠穿透與快捷鍵。
 - [x] System Tray 常駐、關閉／最小化隱藏、Overlay 啟動後自動收合及 Tray-only Exit。
+- [x] 使用者控制的經濟／可選軍事 SendInput 序列、Overlay 狀態按鈕、可自訂啟停熱鍵與緊急停止。
 - [x] Dashboard 設定、遊戲連線、Live diagnostics 與最近對局。
 - [x] 可停用的 SQLite Session／Snapshot／Recommendation event。
 - [x] 使用者主動 JSON 診斷匯出；不含 Screenshot 或帳號資訊。
 - [x] Privacy、Disclaimer、第三方授權與執行指南。
 - [x] Self-contained `win-x64` Portable ZIP 與 SHA-256。
-- [x] Debug／Release build、28 項自動測試與發佈後 OCR smoke test。
+- [x] Debug／Release build、34 項自動測試、GUI 啟動與發佈後 OCR smoke test。
 - [x] 明確遊戲生命週期、主選單暫停辨識與暫停建議抑制。
 - [x] 可重跑 Vision／Replay JSON 報告與 200 幀無 Crash 壓力回放。
 - [x] 可停用、會輪替的結構化本機 JSONL 診斷事件。
@@ -23,7 +24,7 @@ artifacts/packages/AgePilot-public-alpha-win-x64.zip
 artifacts/packages/AgePilot-public-alpha-win-x64.zip.sha256
 ```
 
-目前產物 SHA-256：`159BA5477F58BB004B621B9AE8EAA1EAEF5569D1466F0A31CEFF9FC64BF6F664`。
+目前產物 SHA-256：`236A3C8FBE73812D650AEC2B690048A5953E6CB1828400FCB915969B3DBEF598`。
 
 建置命令：
 

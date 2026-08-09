@@ -15,7 +15,7 @@
 %LocalAppData%\AgePilot\logs\agepilot.jsonl
 ```
 
-`settings.json` 保存 HUD Profile、透明度、掃描間隔與是否保存 Session。
+`settings.json` 保存 HUD Profile、透明度、掃描間隔、是否保存 Session，以及使用者設定的自動操作熱鍵與按鍵序列。
 
 `agepilot.db` 保存：
 

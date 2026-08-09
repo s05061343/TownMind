@@ -24,6 +24,7 @@ public partial class DashboardWindow : Window
     private OverlayWindow? _overlay;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ToolStripMenuItem _trayOverlayItem;
+    private readonly Drawing.Icon? _applicationIcon;
     private bool _allowExit;
 
     public DashboardWindow(JsonSettingsStore store)
@@ -36,9 +37,12 @@ public partial class DashboardWindow : Window
         trayMenu.Items.Add(_trayOverlayItem);
         trayMenu.Items.Add(new Forms.ToolStripSeparator());
         trayMenu.Items.Add(new Forms.ToolStripMenuItem("結束 AgePilot", null, (_, _) => Dispatcher.Invoke(ExitApplication)));
+        _applicationIcon = Environment.ProcessPath is null
+            ? null
+            : Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath);
         _trayIcon = new Forms.NotifyIcon
         {
-            Icon = Drawing.SystemIcons.Application,
+            Icon = _applicationIcon ?? Drawing.SystemIcons.Application,
             Text = "AgePilot",
             ContextMenuStrip = trayMenu,
             Visible = true,
@@ -56,6 +60,7 @@ public partial class DashboardWindow : Window
             _overlay?.Close();
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
+            _applicationIcon?.Dispose();
         };
     }
 
@@ -71,6 +76,19 @@ public partial class DashboardWindow : Window
         OpacitySlider.Value = _settings.OverlayOpacity;
         SessionRecordingCheck.IsChecked = _settings.EnableSessionRecording;
         LocalDiagnosticsCheck.IsChecked = _settings.EnableLocalDiagnostics;
+        AutomationStartHotKeyText.Text = _settings.AutomationStartHotKey;
+        AutomationStopHotKeyText.Text = _settings.AutomationStopHotKey;
+        VillagerSequenceText.Text = _settings.VillagerProductionSequence;
+        MilitaryAutomationCheck.IsChecked = _settings.EnableMilitaryAutomation;
+        BarracksSequenceText.Text = _settings.BarracksProductionSequence;
+        ArcheryRangeSequenceText.Text = _settings.ArcheryRangeProductionSequence;
+        StableSequenceText.Text = _settings.StableProductionSequence;
+        IdleVillagerSequenceText.Text = _settings.IdleVillagerSelectionSequence;
+        HouseSequenceText.Text = _settings.HouseBuildSequence;
+        MarketSequenceText.Text = _settings.MarketBuildSequence;
+        BlacksmithSequenceText.Text = _settings.BlacksmithBuildSequence;
+        FeudalUpgradeSequenceText.Text = _settings.FeudalUpgradeSequence;
+        CastleUpgradeSequenceText.Text = _settings.CastleUpgradeSequence;
         ScanIntervalCombo.SelectedItem = ScanIntervalCombo.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(item => item.Content?.ToString() == _settings.ScanIntervalMilliseconds.ToString());
         if (ScanIntervalCombo.SelectedIndex < 0) ScanIntervalCombo.SelectedIndex = 1;
@@ -102,7 +120,7 @@ public partial class DashboardWindow : Window
             var profilePath = ResolveProfilePath(_settings.HudProfilePath);
             _overlay = new OverlayWindow(
                 profilePath,
-                _settings.ScanIntervalMilliseconds,
+                _settings,
                 _settings.EnableSessionRecording ? SqliteSessionRepository.CreateDefault() : null,
                 _settings.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null)
             { Opacity = _settings.OverlayOpacity, Owner = this };
@@ -166,6 +184,22 @@ public partial class DashboardWindow : Window
             ScanIntervalMilliseconds = int.TryParse(intervalText, out var interval) ? interval : 500,
             EnableSessionRecording = SessionRecordingCheck.IsChecked == true,
             EnableLocalDiagnostics = LocalDiagnosticsCheck.IsChecked == true,
+            AutomationStartHotKey = AutomationStartHotKeyText.Text.Trim(),
+            AutomationStopHotKey = AutomationStopHotKeyText.Text.Trim(),
+            VillagerProductionSequence = VillagerSequenceText.Text.Trim(),
+            EnableMilitaryAutomation = MilitaryAutomationCheck.IsChecked == true,
+            BarracksProductionSequence = BarracksSequenceText.Text.Trim(),
+            ArcheryRangeProductionSequence = ArcheryRangeSequenceText.Text.Trim(),
+            StableProductionSequence = StableSequenceText.Text.Trim(),
+            IdleVillagerSelectionSequence = IdleVillagerSequenceText.Text.Trim(),
+            HouseBuildSequence = HouseSequenceText.Text.Trim(),
+            MarketBuildSequence = MarketSequenceText.Text.Trim(),
+            BlacksmithBuildSequence = BlacksmithSequenceText.Text.Trim(),
+            FeudalUpgradeSequence = FeudalUpgradeSequenceText.Text.Trim(),
+            CastleUpgradeSequence = CastleUpgradeSequenceText.Text.Trim(),
+            EconomyActionIntervalMilliseconds = _settings.EconomyActionIntervalMilliseconds,
+            MilitaryActionIntervalMilliseconds = _settings.MilitaryActionIntervalMilliseconds,
+            StrategicActionIntervalMilliseconds = _settings.StrategicActionIntervalMilliseconds,
         };
         settings.Validate();
         return settings;
@@ -194,7 +228,16 @@ public partial class DashboardWindow : Window
                 exportedAt = DateTimeOffset.Now,
                 appVersion = typeof(DashboardWindow).Assembly.GetName().Version?.ToString(),
                 environment = new { os = Environment.OSVersion.VersionString, runtime = Environment.Version.ToString(), is64Bit = Environment.Is64BitProcess },
-                settings = new { _settings.HudProfilePath, _settings.ScanIntervalMilliseconds, _settings.EnableSessionRecording, _settings.EnableLocalDiagnostics },
+                settings = new
+                {
+                    _settings.HudProfilePath,
+                    _settings.ScanIntervalMilliseconds,
+                    _settings.EnableSessionRecording,
+                    _settings.EnableLocalDiagnostics,
+                    _settings.AutomationStartHotKey,
+                    _settings.AutomationStopHotKey,
+                    _settings.EnableMilitaryAutomation,
+                },
                 liveDiagnostics = DiagnosticsText.Text,
                 sessions,
                 privacy = "不含遊戲截圖、按鍵內容、帳號名稱或網路遙測。",

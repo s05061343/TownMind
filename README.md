@@ -1,8 +1,12 @@
 # AgePilot
 
+<p align="center">
+  <img src="assets/branding/agepilot-logo-256.png" width="160" alt="AgePilot 老鷹六角徽章" />
+</p>
+
 > A calm companion for Age of Empires II.
 
-AgePilot 是 Windows 本機桌面教練，從《Age of Empires II: Definitive Edition》畫面讀取 HUD，提供低干擾的經濟與人口建議。它不注入遊戲、不讀取遊戲記憶體、不發送輸入，也不預設上傳任何畫面。
+AgePilot 是 Windows 本機桌面教練，從《Age of Empires II: Definitive Edition》畫面讀取 HUD，提供低干擾的經濟與人口建議，並可由使用者選擇啟用本機快捷鍵生產操作。它不注入遊戲、不讀取遊戲記憶體，也不預設上傳任何畫面。
 
 ## Public Alpha 支援環境
 
@@ -35,6 +39,8 @@ Dashboard 可啟動 Overlay、保存設定並查看最近 Session。詳細說明
 - Compact Overlay、滑鼠穿透與全域快捷鍵。
 - Dashboard、JSON 設定與可停用的 SQLite Session history。
 - System Tray 常駐；關閉／最小化 Dashboard 或啟動 Overlay 時自動收至通知區。
+- 可選自動生產村民與軍事序列；只在 AOE2 位於前景且 HUD 可靠時透過 Windows SendInput 執行。
+- 實驗性通用經濟代理：可見資源／空地分析、閒置村民分配、補房、21 人升封建、前置建築與升城確認流程。
 - 本機 Vision／Rule diagnostics，以及使用者主動觸發的匿名 JSON 匯出。
 - 可重跑的 Screenshot Vision、Replay 與 Live performance JSON 報告。
 

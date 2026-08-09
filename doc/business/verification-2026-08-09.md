@@ -9,10 +9,10 @@ dotnet build AgePilot.sln --no-restore
 結果：成功，0 warnings，0 errors
 
 dotnet run --no-build --project tests/AgePilot.Tests
-結果：28/28 passed
+結果：34/34 passed
 ```
 
-測試涵蓋 ROI 映射、Profile、解析器、四張實際 Screenshot OCR、Vision 指標、暫停辨識、Adaptive ROI cache、生命週期、Temporal confirmation、Farmer Rules、Recommendation lifecycle、設定、JSONL 日誌與 SQLite round-trip。
+測試涵蓋 ROI 映射、Profile、解析器、四張實際 Screenshot OCR、Vision 指標、暫停辨識、Adaptive ROI cache、生命週期、Temporal confirmation、Farmer Rules、Recommendation lifecycle、設定、JSONL 日誌、SQLite round-trip、品牌 ICO、自動操作熱鍵／序列／經濟條件、通用經濟規劃與世界候選分析。
 
 ## Vision Benchmark
 
@@ -51,12 +51,15 @@ Replay 刻意不等待、持續以最大吞吐處理，且記憶體中同時保�
 - GUI smoke：關閉 Dashboard 後程序仍存活且視窗從工作列消失。
 - GUI smoke：最小化 Dashboard 後程序仍存活且視窗從工作列消失。
 - GUI smoke：啟動 Overlay 後 Dashboard 為 off-screen，AgePilot 程序與 Overlay 持續運作。
+- 老鷹品牌圖示已內嵌至 EXE、WPF 視窗與系統匣；發佈版 EXE 可讀取 32×32 shell icon，來源 ICO 含 16、24、32、48、64、128、256 px。
+- 自動模式預設關閉，Overlay 顯示狀態與切換按鈕；可自訂開啟／緊急停止熱鍵與經濟／軍事序列。輸入層會在 AOE2 非前景時 fail closed。
+- 自動操作回歸涵蓋 `19/20` 仍允許一名村民、`20/20` 停止；另完成同人口防重複排隊、輸入例外隔離、停止熱鍵優先註冊與權限錯誤提示稽核。
 
 最終可攜版：
 
 ```text
 artifacts/packages/AgePilot-public-alpha-win-x64.zip
-SHA-256 159BA5477F58BB004B621B9AE8EAA1EAEF5569D1466F0A31CEFF9FC64BF6F664
+SHA-256 236A3C8FBE73812D650AEC2B690048A5953E6CB1828400FCB915969B3DBEF598
 ```
 
 ## 尚缺的外部證據

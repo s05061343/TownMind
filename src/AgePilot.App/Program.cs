@@ -9,6 +9,12 @@ using AgePilot.Core.Configuration;
 using AgePilot.Infrastructure.Persistence;
 using AgePilot.Vision.Benchmarking;
 using AgePilot.Infrastructure.Diagnostics;
+using System.Runtime.InteropServices;
+
+if (args.Length > 0)
+{
+    ConsoleHost.AttachToParent();
+}
 
 return args switch
 {
@@ -134,7 +140,10 @@ static int RunOverlay(string profilePath)
         try
         {
             var application = new System.Windows.Application();
-            application.Run(new OverlayWindow(ResolveInputPath(profilePath), sessionRepository: SqliteSessionRepository.CreateDefault(), logger: LocalJsonLineLogger.CreateDefault()));
+            var settingsStore = JsonSettingsStore.CreateDefault();
+            var settings = settingsStore.Load();
+            settings.HudProfilePath = profilePath;
+            application.Run(new OverlayWindow(ResolveInputPath(profilePath), settings, sessionRepository: SqliteSessionRepository.CreateDefault(), logger: LocalJsonLineLogger.CreateDefault()));
         }
         catch (Exception exception)
         {
@@ -257,4 +266,21 @@ static string ResolveInputPath(string path)
 {
     if (Path.IsPathRooted(path) || File.Exists(path)) return path;
     return Path.GetFullPath(path, AppContext.BaseDirectory);
+}
+
+internal static class ConsoleHost
+{
+    private const uint AttachParentProcess = 0xFFFFFFFF;
+
+    public static void AttachToParent()
+    {
+        if (!AttachConsole(AttachParentProcess)) return;
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+        Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+        Console.SetIn(new StreamReader(Console.OpenStandardInput()));
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachConsole(uint processId);
 }

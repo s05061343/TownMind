@@ -14,6 +14,8 @@ using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using AgePilot.Vision.Benchmarking;
 using AgePilot.Infrastructure.Diagnostics;
+using AgePilot.Core.Automation;
+using AgePilot.Vision.World;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -45,6 +47,12 @@ var tests = new (string Name, Action Run)[]
     ("Settings round trip", SettingsRoundTrip),
     ("Local diagnostic log is JSON lines", LocalDiagnosticLogIsJsonLines),
     ("SQLite session round trip", SqliteSessionRoundTrip),
+    ("Brand assets include Windows icon sizes", BrandAssetsIncludeWindowsIconSizes),
+    ("Automation hotkeys and sequences are parsed", AutomationInputsAreParsed),
+    ("Automation settings reject conflicting hotkeys", AutomationSettingsRejectConflictingHotkeys),
+    ("Economy automation queues villager only when safe", EconomyAutomationQueuesVillagerOnlyWhenSafe),
+    ("Generic planner covers house and age progression", GenericPlannerCoversHouseAndAgeProgression),
+    ("Generic world analyzer finds actionable candidates", GenericWorldAnalyzerFindsCandidates),
 };
 
 var failures = 0;
@@ -373,13 +381,30 @@ static void SettingsRoundTrip()
     try
     {
         var store = new JsonSettingsStore(path);
-        store.Save(new AppSettings { HudProfilePath = "profile.json", OverlayOpacity = 0.85, ScanIntervalMilliseconds = 1000, EnableSessionRecording = false, EnableLocalDiagnostics = false });
+        store.Save(new AppSettings
+        {
+            HudProfilePath = "profile.json",
+            OverlayOpacity = 0.85,
+            ScanIntervalMilliseconds = 1000,
+            EnableSessionRecording = false,
+            EnableLocalDiagnostics = false,
+            AutomationStartHotKey = "Alt+F10",
+            AutomationStopHotKey = "Alt+F12",
+            VillagerProductionSequence = "Ctrl+H,Q",
+            EnableMilitaryAutomation = true,
+            BarracksProductionSequence = "B,Q",
+        });
         var loaded = store.Load();
         Equal("profile.json", loaded.HudProfilePath);
         Equal(0.85, loaded.OverlayOpacity);
         Equal(1000, loaded.ScanIntervalMilliseconds);
         Equal(false, loaded.EnableSessionRecording);
         Equal(false, loaded.EnableLocalDiagnostics);
+        Equal("Alt+F10", loaded.AutomationStartHotKey);
+        Equal("Alt+F12", loaded.AutomationStopHotKey);
+        Equal("Ctrl+H,Q", loaded.VillagerProductionSequence);
+        Equal(true, loaded.EnableMilitaryAutomation);
+        Equal("B,Q", loaded.BarracksProductionSequence);
     }
     finally { if (File.Exists(path)) File.Delete(path); }
 }
@@ -455,6 +480,125 @@ static string FindRepositoryFile(params string[] parts)
     }
 
     throw new FileNotFoundException($"Repository file not found: {Path.Combine(parts)}");
+}
+
+static void BrandAssetsIncludeWindowsIconSizes()
+{
+    var master = FindRepositoryFile("assets", "branding", "agepilot-logo-master.png");
+    Equal(true, new FileInfo(master).Length > 100_000);
+
+    var icon = FindRepositoryFile("assets", "branding", "agepilot.ico");
+    using var stream = File.OpenRead(icon);
+    using var reader = new BinaryReader(stream);
+    Equal((ushort)0, reader.ReadUInt16());
+    Equal((ushort)1, reader.ReadUInt16());
+    var count = reader.ReadUInt16();
+    Equal((ushort)7, count);
+
+    var sizes = new HashSet<int>();
+    for (var index = 0; index < count; index++)
+    {
+        var width = reader.ReadByte();
+        var height = reader.ReadByte();
+        sizes.Add(width == 0 ? 256 : width);
+        Equal(width, height);
+        reader.ReadBytes(14);
+    }
+
+    Equal(true, new[] { 16, 24, 32, 48, 64, 128, 256 }.All(sizes.Contains));
+}
+
+static void AutomationInputsAreParsed()
+{
+    var hotKey = InputSequence.ParseHotKey("Ctrl+F10");
+    Equal(2, hotKey.Keys.Count);
+    Equal("F10", hotKey.Keys[1]);
+
+    var sequence = InputSequence.Parse("Ctrl+H,Q");
+    Equal(2, sequence.Count);
+    Equal(2, sequence[0].Keys.Count);
+    Equal("Q", sequence[1].Keys[0]);
+    Equal(".", InputSequence.Parse(".")[0].Keys[0]);
+}
+
+static void AutomationSettingsRejectConflictingHotkeys()
+{
+    var settings = new AppSettings
+    {
+        AutomationStartHotKey = "Ctrl+F10",
+        AutomationStopHotKey = "ctrl+f10",
+    };
+    Throws<InvalidDataException>(settings.Validate);
+}
+
+static void EconomyAutomationQueuesVillagerOnlyWhenSafe()
+{
+    var now = DateTimeOffset.UtcNow;
+    var ready = new GameState
+    {
+        Food = Confirmed(80, now),
+        Population = Confirmed(12, now),
+        PopulationCap = Confirmed(20, now),
+    };
+    Equal(AutomationActionKind.QueueVillager, AutomationPolicy.DecideEconomy(ready).Kind);
+
+    var oneSlotLeft = new GameState
+    {
+        Food = Confirmed(80, now),
+        Population = Confirmed(19, now),
+        PopulationCap = Confirmed(20, now),
+    };
+    Equal(AutomationActionKind.QueueVillager, AutomationPolicy.DecideEconomy(oneSlotLeft).Kind);
+
+    var capped = new GameState
+    {
+        Food = Confirmed(80, now),
+        Population = Confirmed(20, now),
+        PopulationCap = Confirmed(20, now),
+    };
+    Equal(AutomationActionKind.None, AutomationPolicy.DecideEconomy(capped).Kind);
+    Equal(AutomationActionKind.None, AutomationPolicy.DecideEconomy(new GameState()).Kind);
+}
+
+static void GenericPlannerCoversHouseAndAgeProgression()
+{
+    var now = DateTimeOffset.UtcNow;
+    var world = new WorldObservation(2560, 1440,
+        [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.8)], 0.8);
+    var planner = new GenericEconomicPlanner();
+    var needsHouse = new GameState
+    {
+        Age = GameAge.Dark,
+        Food = Confirmed(200, now), Wood = Confirmed(100, now),
+        Gold = Confirmed(100, now), Population = Confirmed(19, now), PopulationCap = Confirmed(20, now),
+    };
+    Equal(EconomicActionKind.BuildHouse, planner.Decide(needsHouse, world, false, false).Kind);
+
+    var feudalReady = new GameState
+    {
+        Age = GameAge.Dark,
+        Food = Confirmed(500, now), Wood = Confirmed(20, now),
+        Gold = Confirmed(0, now), Population = Confirmed(21, now), PopulationCap = Confirmed(30, now),
+    };
+    Equal(EconomicActionKind.AdvanceFeudal, planner.Decide(feudalReady, world, false, false).Kind);
+
+    var castleReady = new GameState
+    {
+        Age = GameAge.Feudal,
+        Food = Confirmed(800, now), Wood = Confirmed(50, now),
+        Gold = Confirmed(200, now), Population = Confirmed(30, now), PopulationCap = Confirmed(40, now),
+    };
+    Equal(EconomicActionKind.AdvanceCastle, planner.Decide(castleReady, world, true, true).Kind);
+}
+
+static void GenericWorldAnalyzerFindsCandidates()
+{
+    var image = BgraImageLoader.Load(FindRepositoryFile("doc", "Snipaste_2026-08-09_18-54-29.jpg"));
+    var world = new GenericWorldAnalyzer().Analyze(image.Pixels, image.Width, image.Height);
+    var summary = string.Join(", ", world.Targets.GroupBy(target => target.Kind).Select(group => $"{group.Key}:{group.Count()}"));
+    EqualContext(true, world.Targets.Any(target => target.Kind == WorldTargetKind.Wood), $"world targets [{summary}]");
+    EqualContext(true, world.Targets.Any(target => target.Kind == WorldTargetKind.OpenBuildArea), $"world targets [{summary}]");
+    Equal(true, world.Targets.All(target => target.X is >= 0 and <= 1 && target.Y is >= 0 and <= 1));
 }
 
 static void Equal<T>(T expected, T actual)

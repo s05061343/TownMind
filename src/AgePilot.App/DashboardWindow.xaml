@@ -1,13 +1,16 @@
 <Window x:Class="AgePilot.App.DashboardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AgePilot" Width="680" Height="650" MinWidth="600" MinHeight="560"
+        Title="AgePilot" Icon="Assets/Branding/agepilot.ico" Width="720" Height="820" MinWidth="640" MinHeight="650"
         Background="#151713" Foreground="#EEE9DD" WindowStartupLocation="CenterScreen">
     <Grid Margin="28">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <StackPanel>
-            <TextBlock Text="AgePilot" Foreground="#C6A15B" FontSize="30" FontWeight="SemiBold"/>
-            <TextBlock Text="A calm companion for Age of Empires II" Foreground="#9FA695" Margin="0,4,0,0"/>
+        <StackPanel Orientation="Horizontal">
+            <Image Source="Assets/Branding/agepilot-logo.png" Width="52" Height="52" Margin="0,0,14,0"/>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="AgePilot" Foreground="#C6A15B" FontSize="30" FontWeight="SemiBold"/>
+                <TextBlock Text="A calm companion for Age of Empires II" Foreground="#9FA695" Margin="0,4,0,0"/>
+            </StackPanel>
         </StackPanel>
         <Border Grid.Row="1" Background="#20241D" CornerRadius="8" Padding="16" Margin="0,24,0,18">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -27,6 +30,45 @@
             </ComboBox>
             <CheckBox x:Name="SessionRecordingCheck" Content="儲存本機對局紀錄（SQLite）" Margin="0,14,0,0" Foreground="#EEE9DD"/>
             <CheckBox x:Name="LocalDiagnosticsCheck" Content="儲存本機診斷事件（JSONL）" Margin="0,8,0,0" Foreground="#EEE9DD"/>
+            <Separator Margin="0,20,0,14" Background="#42483D"/>
+            <TextBlock Text="自動操作" Foreground="#C6A15B" FontSize="16" FontWeight="SemiBold"/>
+            <TextBlock Text="只在 AOE2 位於前景且 HUD 狀態可靠時送出按鍵。房屋位置仍由你手動決定。序列以逗號分隔，組合鍵用 +。"
+                       Foreground="#9FA695" TextWrapping="Wrap" Margin="0,6,0,12"/>
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <TextBlock Text="開啟熱鍵" VerticalAlignment="Center" Foreground="#C9C5BA"/>
+                <TextBox x:Name="AutomationStartHotKeyText" Grid.Column="1" Padding="6" Margin="0,3" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                <TextBlock Grid.Column="3" Text="緊急關閉熱鍵" VerticalAlignment="Center" Foreground="#C9C5BA"/>
+                <TextBox x:Name="AutomationStopHotKeyText" Grid.Column="4" Padding="6" Margin="0,3" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+
+                <TextBlock Grid.Row="1" Text="村民生產序列" VerticalAlignment="Center" Foreground="#C9C5BA"/>
+                <TextBox x:Name="VillagerSequenceText" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4" Padding="6" Margin="0,3" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D" ToolTip="預設 H,Q：選擇城鎮中心後排入村民"/>
+
+                <CheckBox x:Name="MilitaryAutomationCheck" Grid.Row="2" Grid.ColumnSpan="5" Content="加入軍事操作（只執行下方非空白序列）" Margin="0,9,0,5" Foreground="#EEE9DD"/>
+
+                <StackPanel Grid.Row="3" Grid.ColumnSpan="5">
+                    <TextBlock Text="軍營序列" Foreground="#9FA695"/>
+                    <TextBox x:Name="BarracksSequenceText" Padding="6" Margin="0,3,0,6" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                    <TextBlock Text="靶場序列" Foreground="#9FA695"/>
+                    <TextBox x:Name="ArcheryRangeSequenceText" Padding="6" Margin="0,3,0,6" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                    <TextBlock Text="馬廄序列" Foreground="#9FA695"/>
+                    <TextBox x:Name="StableSequenceText" Padding="6" Margin="0,3,0,0" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                    <TextBlock Text="閒置村民選取序列" Foreground="#9FA695" Margin="0,8,0,0"/>
+                    <TextBox x:Name="IdleVillagerSequenceText" Padding="6" Margin="0,3,0,6" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                    <TextBlock Text="房屋／市場／鐵匠鋪序列" Foreground="#9FA695"/>
+                    <Grid Margin="0,3,0,6"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="HouseSequenceText" Padding="6" Margin="0,0,4,0" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D" ToolTip="房屋"/>
+                        <TextBox x:Name="MarketSequenceText" Grid.Column="1" Padding="6" Margin="2,0" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D" ToolTip="市場"/>
+                        <TextBox x:Name="BlacksmithSequenceText" Grid.Column="2" Padding="6" Margin="4,0,0,0" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D" ToolTip="鐵匠鋪"/>
+                    </Grid>
+                    <TextBlock Text="封建／城堡升級序列" Foreground="#9FA695"/>
+                    <Grid Margin="0,3,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="FeudalUpgradeSequenceText" Padding="6" Margin="0,0,4,0" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D" ToolTip="升封建"/>
+                        <TextBox x:Name="CastleUpgradeSequenceText" Grid.Column="1" Padding="6" Margin="4,0,0,0" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D" ToolTip="升城堡"/>
+                    </Grid>
+                </StackPanel>
+            </Grid>
             <Separator Margin="0,20,0,14" Background="#42483D"/>
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
