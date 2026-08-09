@@ -1,8 +1,12 @@
 using AgePilot.Core.Observations;
+using AgePilot.Core;
+using AgePilot.Core.History;
+using AgePilot.Core.Rules;
 using AgePilot.Vision.Geometry;
 using AgePilot.Vision.Images;
 using AgePilot.Vision.Ocr;
 using AgePilot.Vision.Profiles;
+using AgePilot.Vision.Observations;
 using System.Text.Json;
 
 var tests = new (string Name, Action Run)[]
@@ -14,6 +18,13 @@ var tests = new (string Name, Action Run)[]
     ("JPEG dimensions are read", JpegDimensionsAreRead),
     ("Screenshot manifest references existing assets", ScreenshotManifestReferencesExistingAssets),
     ("Numeric OCR text is normalized", NumericTextIsNormalized),
+    ("Population OCR text is parsed", PopulationTextIsParsed),
+    ("Reference HUD OCR matches ground truth", ReferenceHudOcrMatchesGroundTruth),
+    ("Live HUD zero OCR matches ground truth", LiveHudZeroOcrMatchesGroundTruth),
+    ("OCR result becomes confirmed game state", OcrResultBecomesConfirmedGameState),
+    ("Population critical has priority", PopulationCriticalHasPriority),
+    ("Active recommendation remains visible", ActiveRecommendationRemainsVisible),
+    ("Low confidence zero requires temporal confirmation", LowConfidenceZeroRequiresTemporalConfirmation),
     ("Unavailable observation is not usable", UnavailableObservationIsNotUsable),
 };
 
@@ -96,6 +107,122 @@ static void UnavailableObservationIsNotUsable()
     Equal(false, observation.IsUsable);
     Equal<int?>(null, observation.Value);
 }
+
+static void PopulationTextIsParsed()
+{
+    Equal(new PopulationValue(4, 5), PopulationTextParser.Parse(" 4/5 "));
+    Equal(new PopulationValue(83, 100), PopulationTextParser.Parse("83 / 100"));
+    Equal<PopulationValue?>(null, PopulationTextParser.Parse("100/80"));
+}
+
+static void ReferenceHudOcrMatchesGroundTruth()
+{
+    var imagePath = FindRepositoryFile("doc", "Snipaste_2026-08-09_16-29-15.jpg");
+    var profile = HudProfileLoader.Load(
+        FindRepositoryFile("config", "hud", "aoe2de-zh-tw-2560x1440-50.json"));
+    using var engine = new PaddleNumericOcrEngine();
+    var result = new HudOcrAnalyzer(engine).AnalyzeJpeg(imagePath, profile);
+
+    Equal(200, result.Fields[HudField.Wood].Value);
+    Equal(200, result.Fields[HudField.Food].Value);
+    Equal(100, result.Fields[HudField.Gold].Value);
+    Equal(200, result.Fields[HudField.Stone].Value);
+    Equal(new PopulationValue(4, 5), result.Population);
+}
+
+static void LiveHudZeroOcrMatchesGroundTruth()
+{
+    var imagePath = FindRepositoryFile("doc", "Snipaste_2026-08-09_18-03-12.jpg");
+    var profile = HudProfileLoader.Load(
+        FindRepositoryFile("config", "hud", "aoe2de-zh-tw-2560x1440-50.json"));
+    using var engine = new PaddleNumericOcrEngine();
+    var result = new HudOcrAnalyzer(engine).AnalyzeJpeg(imagePath, profile);
+
+    Equal(0, result.Fields[HudField.Food].Value);
+    Equal(true, result.Fields[HudField.Food].Confidence is >= 0.45 and < 0.7);
+    Equal(new PopulationValue(4, 5), result.Population);
+}
+
+static void OcrResultBecomesConfirmedGameState()
+{
+    var fields = new Dictionary<HudField, OcrResult>
+    {
+        [HudField.Wood] = new("200", 200, 0.99),
+        [HudField.Food] = new("200", 200, 0.99),
+        [HudField.Gold] = new("100", 100, 0.99),
+        [HudField.Stone] = new("200", 200, 0.99),
+        [HudField.Population] = new("4/5", 45, 0.81),
+    };
+    var raw = new HudOcrResult(fields, new PopulationValue(4, 5));
+    var state = new TemporalGameStateEstimator().Update(raw, DateTimeOffset.UtcNow);
+
+    Equal(200, state.Wood?.Value);
+    Equal(4, state.Population?.Value);
+    Equal(5, state.PopulationCap?.Value);
+    Equal(true, state.Population?.IsUsable);
+}
+
+static void PopulationCriticalHasPriority()
+{
+    var now = DateTimeOffset.UtcNow;
+    var state = new GameState
+    {
+        Population = Confirmed(5, now),
+        PopulationCap = Confirmed(5, now),
+        Wood = Confirmed(900, now),
+        Food = Confirmed(200, now),
+    };
+    var engine = new CoachEngine(new ICoachRule[]
+    {
+        new WoodOverflowRule(),
+        new PopulationLowRule(),
+        new PopulationCriticalRule(),
+    });
+
+    var recommendations = engine.Evaluate(state, new GameHistory());
+    Equal("R002", recommendations[0].Id);
+    Equal(2, recommendations.Count);
+}
+
+static void ActiveRecommendationRemainsVisible()
+{
+    var now = DateTimeOffset.UtcNow;
+    var state = new GameState
+    {
+        Population = Confirmed(4, now),
+        PopulationCap = Confirmed(5, now),
+    };
+    var engine = new CoachEngine([new PopulationLowRule()]);
+    var history = new GameHistory();
+
+    Equal("R001", engine.Evaluate(state, history).Single().Id);
+    Equal("R001", engine.Evaluate(state, history).Single().Id);
+}
+
+static void LowConfidenceZeroRequiresTemporalConfirmation()
+{
+    var fields = new Dictionary<HudField, OcrResult>
+    {
+        [HudField.Wood] = new("200", 200, 0.99),
+        [HudField.Food] = new("0", 0, 0.505),
+        [HudField.Gold] = new("100", 100, 0.99),
+        [HudField.Stone] = new("200", 200, 0.99),
+        [HudField.Population] = new("4/5", 45, 0.80),
+    };
+    var raw = new HudOcrResult(fields, new PopulationValue(4, 5));
+    var estimator = new TemporalGameStateEstimator();
+
+    var first = estimator.Update(raw, DateTimeOffset.UtcNow);
+    var second = estimator.Update(raw, DateTimeOffset.UtcNow.AddMilliseconds(500));
+
+    Equal(false, first.Food?.IsUsable);
+    Equal(0, second.Food?.Value);
+    Equal(true, second.Food?.IsUsable);
+    Equal(true, second.Food?.Confidence < 0.7);
+}
+
+static ObservedValue<int> Confirmed(int value, DateTimeOffset at) =>
+    new(value, 0.95, at, ObservationStatus.Confirmed);
 
 static string FindRepositoryFile(params string[] parts)
 {

@@ -9,6 +9,8 @@
 **主要技術：** C# / .NET 8 / WPF  
 **核心原則：** Calm、Local、Read-only、Player-first
 
+> **目前進度（2026-08-09）：** Playable Prototype 已具備持續 OCR、Temporal GameState、三條 Farmer Rules 與 WPF Compact Overlay，並通過 2560×1440 全螢幕首次實機 Capture；仍待多樣本 Vision Gate 驗收。詳細狀態見 `doc/business/vision-spike.md`。
+
 ---
 
 ## 1. 文件目的

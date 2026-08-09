@@ -1,0 +1,54 @@
+<Window x:Class="AgePilot.App.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AgePilot"
+        Width="340" Height="255"
+        WindowStyle="None" AllowsTransparency="True"
+        Background="Transparent" Topmost="True"
+        ShowInTaskbar="True" ResizeMode="NoResize">
+    <Border Background="#EE151713" BorderBrush="#C6A15B" BorderThickness="1"
+            CornerRadius="10" Padding="16" MouseLeftButtonDown="OnDragWindow">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="🌾" FontSize="18" Margin="0,0,8,0"/>
+                    <TextBlock Text="AgePilot" Foreground="#C6A15B" FontSize="18" FontWeight="SemiBold"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="×" Width="26" Height="26" Click="OnClose"
+                        Foreground="#DDD8CC" Background="Transparent" BorderThickness="0" FontSize="18"/>
+            </Grid>
+
+            <TextBlock x:Name="StatusText" Grid.Row="1" Text="正在初始化本機 OCR…"
+                       Foreground="#9FA695" Margin="0,8,0,8"/>
+
+            <UniformGrid Grid.Row="2" Columns="5" Margin="0,0,0,12">
+                <TextBlock x:Name="WoodText" Text="🪵 —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="FoodText" Text="🍖 —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="GoldText" Text="🪙 —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="StoneText" Text="🪨 —" Foreground="#EEE9DD"/>
+                <TextBlock x:Name="PopulationText" Text="👤 —" Foreground="#EEE9DD"/>
+            </UniformGrid>
+
+            <Border Grid.Row="3" Background="#20241D" CornerRadius="6" Padding="10">
+                <StackPanel>
+                    <TextBlock Text="下一步" Foreground="#7FA66A" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="AdviceTitle" Text="等待可靠的遊戲狀態…"
+                               Foreground="#F2EDE1" FontSize="15" FontWeight="SemiBold" Margin="0,5,0,3"/>
+                    <TextBlock x:Name="AdviceDescription" Text="資料不足時，AgePilot 會保持安靜。"
+                               Foreground="#C9C5BA" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

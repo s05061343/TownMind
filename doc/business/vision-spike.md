@@ -1,5 +1,21 @@
 # Phase 0 — Vision Spike 業務規格
 
+## 實作狀態（2026-08-09）
+
+- [x] AOE2 視窗定位。
+- [x] GDI 單幀擷取 backend。
+- [x] 標準化 ROI 與 2560×1440 Profile。
+- [x] 本機 PaddleOCR 與真實截圖回歸。
+- [x] 2 FPS 持續監測迴圈。
+- [x] Confidence fail-closed 與 Temporal median state。
+- [x] PopulationCritical、PopulationLow、WoodOverflow Farmer Rules。
+- [x] Priority、Cooldown 與最多三條建議。
+- [x] WPF Compact Overlay 與背景取消。
+- [x] AOE2 執行中的全螢幕 Capture 實機驗證。
+- [ ] 多樣本 Vision Gate 準確率驗收。
+
+目前狀態是 **Playable Prototype 已通過首次實機串接**，不是 Public Alpha。GDI 已在目前校正環境取得正確畫面；其他顯示模式仍需個別驗證。
+
 ## 1. 目的
 
 Phase 0 只回答一個問題：AgePilot 能否從 AOE2 DE 畫面可靠取得 Tier A 資料，並在資料不可靠時保持沉默？
@@ -65,7 +81,10 @@ Phase 0 只回答一個問題：AgePilot 能否從 AOE2 DE 畫面可靠取得 Ti
 
 ## 7. 尚未完成
 
-- OCR 引擎選型與整合。
+- PaddleOCR 已選定；仍需完成實際 ROI 整合與 Vision Gate 測量。
+- `ocr-image` 已提供固定截圖的 ROI OCR；仍需累積樣本與進行 Vision Gate 測量。
+- `scan-live` 會尋找 AOE2、擷取單幀並直接輸出五個 HUD OCR 結果。
+- `overlay` 以 2 FPS 執行持續擷取與 OCR，經 Temporal GameState 後顯示 Farmer Mode 建議。
 - Windows Graphics Capture 實際串接。
 - HUD Anchor 圖示辨識。
 - 多張遊戲樣本與 metadata ground truth。
@@ -97,3 +116,9 @@ Population  4 / 5
 ```
 
 機器可讀版本位於 `testdata/screenshots/manifest.json`。這筆資料目前只能驗證 ROI、圖片尺寸與後續 OCR 管線整合，單張樣本不能用來宣稱準確率達標。
+
+目前回歸結果：五個欄位與本筆 ground truth 完全一致；Population confidence 約 80%，其他資源約 99.9%～100%。
+
+第二筆實機畫面確認 Food `0` 的 OCR confidence 約 50.5%。45%～70% 的候選值必須連續兩幀完全相同才確認，原始 confidence 保留；低於 70% 的資料不得驅動高信心 Coach Rule。
+
+Cooldown 只適用於未來的聲音、Toast 或重新通知，不得隱藏仍然成立的 Overlay active recommendation。

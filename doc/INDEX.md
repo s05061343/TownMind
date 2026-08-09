@@ -9,6 +9,8 @@
 | [AgePilot_Project_Plan_v2.md](AgePilot_Project_Plan_v2.md) | 目前產品範圍、Gate、里程碑與驗收基準 | 規劃功能、調整階段或驗收時 |
 | [business/vision-spike.md](business/vision-spike.md) | Phase 0 業務規則、支援矩陣與完成定義 | Capture、ROI、OCR、Observation 工作 |
 | [decisions/0001-normalized-roi.md](decisions/0001-normalized-roi.md) | 標準化 ROI 與 Anchor 校正的架構決策 | 修改 HUD 定位或解析度支援時 |
+| [decisions/0002-local-paddleocr.md](decisions/0002-local-paddleocr.md) | 本機 PaddleOCR runtime、模型與替換邊界 | OCR 引擎、套件或部署工作 |
+| [guides/running-phase0.md](guides/running-phase0.md) | 建置、參考圖 OCR、即時單幀掃描與已知限制 | 執行或驗證目前程式時 |
 
 ## 參考資料
 
