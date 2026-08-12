@@ -7,6 +7,8 @@ using AgePilot.Core.Persistence;
 using AgePilot.Infrastructure.Diagnostics;
 using AgePilot.Core.Configuration;
 using System.Windows.Media;
+using AgePilot.Core.Automation;
+using AgePilot.Core.Planning;
 
 namespace AgePilot.App;
 
@@ -15,6 +17,8 @@ public partial class OverlayWindow : Window
     public event EventHandler<LiveCoachUpdate>? CoachUpdated;
     private const int HotKeyToggleVisibility = 0xA901;
     private const int HotKeyToggleClickThrough = 0xA902;
+    private const int HotKeyAutomationStart = 0xA903;
+    private const int HotKeyAutomationStop = 0xA904;
     private const int WindowMessageHotKey = 0x0312;
     private const int ExtendedStyleIndex = -20;
     private const int ExtendedStyleTransparent = 0x20;
@@ -25,6 +29,8 @@ public partial class OverlayWindow : Window
 
     private readonly CancellationTokenSource _cancellation = new();
     private readonly LiveCoachService _coach;
+    private readonly AutomationController _automation;
+    private readonly AppSettings _settings;
     private Task? _monitorTask;
     private nint _windowHandle;
     private bool _isClickThrough;
@@ -37,7 +43,9 @@ public partial class OverlayWindow : Window
         LocalJsonLineLogger? logger = null)
     {
         InitializeComponent();
+        _settings = settings;
         _coach = new LiveCoachService(profilePath, settings, settings.ScanIntervalMilliseconds, sessionRepository, logger);
+        _automation = new AutomationController(settings, logger);
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         Closed += OnClosed;
@@ -60,6 +68,8 @@ public partial class OverlayWindow : Window
     private Task UpdateUiAsync(LiveCoachUpdate update) => Dispatcher.InvokeAsync(() =>
     {
         CoachUpdated?.Invoke(this, update);
+        _automation.Handle(update, DateTimeOffset.UtcNow);
+        if (_automation.ConsumePlanningEvent() is { } executionEvent) _coach.ReportExecutionEvent(executionEvent);
         UpdatePlanningUi(update.LlmStatus);
         WorldStateText.Text = update.Map?.IsUsable == true
             ? $"小地圖：{update.Map.Archetype} · {update.Map.Confidence:P0}"
@@ -74,7 +84,9 @@ public partial class OverlayWindow : Window
             (update.IsConnected ? "沒有需要立即提醒的事項。" : "啟動 AOE2 並進入對局後會自動開始。 ");
         DismissButton.Visibility = advice is null ? Visibility.Collapsed : Visibility.Visible;
         OtherAdviceText.Text = update.Plan is not null
-            ? $"策略：{update.Plan.Strategy} · 目標：{update.Plan.CurrentGoal}{(update.Plan.ReusedAfterPlanningFailure ? "（沿用上一份有效計畫）" : string.Empty)}"
+            ? update.Plan.VisualDecision is { } visual
+                ? $"VLM：{visual.Assessment}\n操作：{Describe(visual.Action)} · 信心 {visual.Confidence:P0}\n預期：{visual.ExpectedResult}"
+                : $"策略：{update.Plan.Strategy} · 目標：{update.Plan.CurrentGoal}{(update.Plan.ReusedAfterPlanningFailure ? "（沿用上一份有效計畫）" : string.Empty)}"
             : update.Recommendations.Count > 1
                 ? "其他：" + string.Join("、", update.Recommendations.Skip(1).Select(item => item.Title))
                 : string.Empty;
@@ -92,6 +104,15 @@ public partial class OverlayWindow : Window
     }
 
     private static string Format(int? value) => value?.ToString() ?? "—";
+
+    private static string Describe(VisualToolAction action) => action.Tool switch
+    {
+        VisualToolKind.KeySequence => $"按鍵 {string.Join(',', action.Keys)}",
+        VisualToolKind.LeftClick => $"左鍵 {action.X:P0},{action.Y:P0}",
+        VisualToolKind.RightClick => $"右鍵 {action.X:P0},{action.Y:P0}",
+        VisualToolKind.Drag => $"拖曳 {action.X:P0},{action.Y:P0} → {action.EndX:P0},{action.EndY:P0}",
+        _ => action.Tool.ToString(),
+    };
 
     private void OnDragWindow(object sender, MouseButtonEventArgs e)
     {
@@ -122,7 +143,8 @@ public partial class OverlayWindow : Window
         source?.AddHook(WindowMessageHook);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleVisibility, ModifierControl | ModifierShift, VirtualKeyA);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleClickThrough, ModifierControl | ModifierShift, VirtualKeyC);
-        AutomationToggleButton.IsEnabled = false;
+        RegisterAutomationHotKeys();
+        AutomationToggleButton.IsEnabled = true;
         UpdateAutomationUi();
     }
 
@@ -143,6 +165,18 @@ public partial class OverlayWindow : Window
                 ToggleClickThrough();
                 handled = true;
                 break;
+            case HotKeyAutomationStart:
+                _automation.Enable();
+                if (_automation.IsEnabled && !_isClickThrough) ToggleClickThrough();
+                UpdateAutomationUi();
+                handled = true;
+                break;
+            case HotKeyAutomationStop:
+                _automation.Disable("Ctrl+F12 緊急停止");
+                if (_isClickThrough) ToggleClickThrough();
+                UpdateAutomationUi();
+                handled = true;
+                break;
         }
 
         return nint.Zero;
@@ -152,22 +186,32 @@ public partial class OverlayWindow : Window
 
     private void OnToggleAutomation(object sender, RoutedEventArgs e)
     {
+        _automation.Toggle(requireDashboardPermission: false);
+        if (_automation.IsEnabled && !_isClickThrough) ToggleClickThrough();
+        if (!_automation.IsEnabled && _isClickThrough) ToggleClickThrough();
         UpdateAutomationUi();
     }
 
     private void UpdateAutomationUi()
     {
-        AutomationStateText.Text = "LLM 規劃預覽";
-        AutomationStateText.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(211, 162, 76));
-        AutomationToggleButton.Content = "僅預覽";
-        AutomationDetailText.Text = "同一份計畫將供 HUD 與未來執行器使用；目前不送出輸入";
-        MilitaryStateText.Text = "軍事規劃：首版未啟用";
+        AutomationStateText.Text = _automation.IsEnabled ? "自動發展已啟用" : "LLM 規劃預演";
+        AutomationStateText.Foreground = new SolidColorBrush(_automation.IsEnabled
+            ? System.Windows.Media.Color.FromRgb(127, 166, 106)
+            : System.Windows.Media.Color.FromRgb(211, 162, 76));
+        AutomationToggleButton.Content = _automation.IsEnabled ? "停止" : "啟用";
+        AutomationDetailText.Text = _automation.LastStatus;
+        MilitaryStateText.Text = "發展建築／經濟科技：依 GamePlan；軍隊與戰鬥未啟用";
     }
 
     private void UpdatePlanningUi(AgePilot.Core.Planning.PlannerRuntimeStatus? status)
     {
         UpdateAutomationUi();
         if (status is null) return;
+        if (_automation.IsEnabled)
+        {
+            AutomationDetailText.Text = $"{_automation.LastStatus} · {status.Message}";
+            return;
+        }
         AutomationStateText.Text = status.Phase == AgePilot.Core.Planning.PlannerRuntimePhase.Ready
             ? "LLM 已就緒"
             : status.Phase == AgePilot.Core.Planning.PlannerRuntimePhase.Planning
@@ -204,6 +248,8 @@ public partial class OverlayWindow : Window
         {
             _ = UnregisterHotKey(_windowHandle, HotKeyToggleVisibility);
             _ = UnregisterHotKey(_windowHandle, HotKeyToggleClickThrough);
+            _ = UnregisterHotKey(_windowHandle, HotKeyAutomationStart);
+            _ = UnregisterHotKey(_windowHandle, HotKeyAutomationStop);
         }
 
         _cancellation.Cancel();
@@ -216,6 +262,30 @@ public partial class OverlayWindow : Window
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+    }
+
+    private void RegisterAutomationHotKeys()
+    {
+        RegisterConfiguredHotKey(HotKeyAutomationStart, _settings.AutomationStartHotKey);
+        RegisterConfiguredHotKey(HotKeyAutomationStop, _settings.AutomationStopHotKey);
+    }
+
+    private void RegisterConfiguredHotKey(int id, string gesture)
+    {
+        var chord = InputSequence.ParseHotKey(gesture);
+        uint modifiers = 0;
+        foreach (var key in chord.Keys.Take(chord.Keys.Count - 1))
+        {
+            if (key.Equals("Ctrl", StringComparison.OrdinalIgnoreCase)) modifiers |= 0x0002;
+            if (key.Equals("Shift", StringComparison.OrdinalIgnoreCase)) modifiers |= 0x0004;
+            if (key.Equals("Alt", StringComparison.OrdinalIgnoreCase)) modifiers |= 0x0001;
+        }
+        var primary = chord.Keys[^1];
+        uint virtualKey = primary.StartsWith("F", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(primary[1..], out var functionNumber)
+            ? (uint)(0x70 + functionNumber - 1)
+            : char.ToUpperInvariant(primary[0]);
+        _ = RegisterHotKey(_windowHandle, id, modifiers, virtualKey);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

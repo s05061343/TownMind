@@ -10,13 +10,15 @@ public sealed class StrategyEngine(IStrategicPlanner planner) : IDisposable
     private GameAge? _lastAge;
     private bool? _lastPopulationCapped;
     private MapArchetype _lastMap = MapArchetype.Unknown;
+    private readonly Queue<PlanningEvent> _executionEvents = new();
 
     public PlannerRuntimeStatus RuntimeStatus => planner is IPlannerRuntimeStatusSource source
         ? source.RuntimeStatus
         : PlannerRuntimeStatus.NotConfigured("規劃器未提供 runtime 狀態");
 
     public Task<(GamePlan? Plan, string? Status)> UpdateAsync(
-        GameState state, GameHistory history, MapContext? map, DateTimeOffset now, CancellationToken cancellationToken)
+        GameState state, GameHistory history, MapContext? map, DateTimeOffset now, CancellationToken cancellationToken,
+        VisualObservation? visual = null)
     {
         if (_pending?.IsCompleted == true)
         {
@@ -36,9 +38,11 @@ public sealed class StrategyEngine(IStrategicPlanner planner) : IDisposable
         if (_pending is null && (changed || now - _lastAttempt >= TimeSpan.FromSeconds(20)))
         {
             _lastAttempt = now;
-            var events = changed ? new[] { new PlanningEvent("state_changed", "時代、人口或地圖狀態改變", now) } : [];
+            var events = _executionEvents.ToList();
+            _executionEvents.Clear();
+            if (changed) events.Add(new PlanningEvent("state_changed", "時代、人口或地圖狀態改變", now));
             var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
-                map?.IsUsable == true ? map : null, _current, events, now);
+                map?.IsUsable == true ? map : null, _current, events, now, visual);
             _pending = planner.PlanAsync(context, cancellationToken);
         }
 
@@ -47,6 +51,13 @@ public sealed class StrategyEngine(IStrategicPlanner planner) : IDisposable
     }
 
     public (GamePlan? Plan, string? Status) Pause(DateTimeOffset now, string status) => (null, status);
+
+    public void ReportExecutionEvent(PlanningEvent executionEvent)
+    {
+        _executionEvents.Enqueue(executionEvent);
+        _current = null;
+        _lastAttempt = DateTimeOffset.MinValue;
+    }
 
     private GamePlan? Current(DateTimeOffset now)
     {

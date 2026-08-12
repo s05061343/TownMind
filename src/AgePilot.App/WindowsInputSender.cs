@@ -85,6 +85,31 @@ internal sealed class WindowsInputSender
         return true;
     }
 
+    public bool TryDrag(double startX, double startY, double endX, double endY, out string status)
+    {
+        if (!TryMove(startX, startY, out status)) return false;
+        var down = new[] { new Input { Type = 0, Data = new InputUnion { Mouse = new MouseInputData { Flags = MouseLeftDown } } } };
+        if (SendInput(1, down, Marshal.SizeOf<Input>()) != 1) { status = "拖曳按下失敗"; return false; }
+        Thread.Sleep(60);
+        if (!TryMove(endX, endY, out status)) return false;
+        var up = new[] { new Input { Type = 0, Data = new InputUnion { Mouse = new MouseInputData { Flags = MouseLeftUp } } } };
+        if (SendInput(1, up, Marshal.SizeOf<Input>()) != 1) { status = "拖曳放開失敗"; return false; }
+        status = $"已拖曳 {startX:P0},{startY:P0} → {endX:P0},{endY:P0}";
+        return true;
+    }
+
+    private bool TryMove(double normalizedX, double normalizedY, out string status)
+    {
+        var game = _locator.Find();
+        if (game is null || GetForegroundWindow() != game.Handle || !GetWindowRect(game.Handle, out var bounds))
+        { status = "遊戲不是可操作的前景視窗"; return false; }
+        var x = bounds.Left + (int)Math.Round((bounds.Right - bounds.Left) * normalizedX);
+        var y = bounds.Top + (int)Math.Round((bounds.Bottom - bounds.Top) * normalizedY);
+        if (!SetCursorPos(x, y)) { status = "無法移動滑鼠"; return false; }
+        status = "滑鼠已移動";
+        return true;
+    }
+
     private static bool TrySendChord(InputChord chord, out string status)
     {
         var keys = chord.Keys.Select(ToVirtualKey).ToArray();

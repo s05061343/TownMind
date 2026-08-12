@@ -52,7 +52,7 @@ AgePilot 不保存或上傳遊戲 Screenshot。詳見 [Privacy](doc/PRIVACY.md)�
 
 AgePilot 是非官方工具，與 Microsoft、Xbox Game Studios、World's Edge 或 Forgotten Empires 無關。使用公開版本前，使用者仍應確認適用的遊戲服務條款與政策。
 
-公開條款未明文確認只讀 OCR Overlay 是否獲允許。在取得官方 Support 明確答覆前，建議只用於單人、對 AI 與非排名測試；詳見 [政策邊界檢查](doc/business/policy-review-2026-08-09.md)。
+公開條款未明文確認只讀 OCR Overlay 或外部自動操作是否獲允許；是否使用及使用情境由專案負責人判斷，詳見 [政策邊界檢查](doc/business/policy-review-2026-08-09.md)。
 
 ## License
 

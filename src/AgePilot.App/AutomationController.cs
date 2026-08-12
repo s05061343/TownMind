@@ -1,6 +1,6 @@
 using AgePilot.Core;
-using AgePilot.Core.Automation;
 using AgePilot.Core.Configuration;
+using AgePilot.Core.Planning;
 using AgePilot.Infrastructure.Diagnostics;
 
 namespace AgePilot.App;
@@ -8,225 +8,112 @@ namespace AgePilot.App;
 internal sealed class AutomationController(AppSettings settings, LocalJsonLineLogger? logger = null)
 {
     private readonly WindowsInputSender _input = new();
-    private readonly GenericEconomicPlanner _planner = new();
-    private DateTimeOffset _lastEconomyAction = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastMilitaryAction = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastVillagerQueueAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastStrategicAction = DateTimeOffset.MinValue;
-    private int? _populationAtLastVillagerQueue;
-    private int _militarySequenceIndex;
-    private string? _lastWaitingReason;
-    private PendingAction? _pendingAction;
-    private bool _marketConfirmed;
-    private bool _blacksmithConfirmed;
+    private readonly HashSet<string> _executedPlans = [];
+    private int _consecutiveFailures;
+    private DateTimeOffset _lastActionAt = DateTimeOffset.MinValue;
+    private readonly Queue<DateTimeOffset> _recentActions = [];
 
     public bool IsEnabled { get; private set; }
-    public string LastStatus { get; private set; } = "自動操作已關閉";
+    public string LastStatus { get; private set; } = "預演模式，不送出輸入";
+    public PlanningEvent? LastPlanningEvent { get; private set; }
 
-    public void Enable()
+    public void Enable(bool requireDashboardPermission = true)
     {
-        IsEnabled = true;
-        LastStatus = "自動操作已開啟；切換至 AOE2 後才會送出按鍵";
-        logger?.Write("automation.enabled", new { settings.EnableMilitaryAutomation });
+        if (requireDashboardPermission && !settings.EnableAutomationInput)
+        { LastStatus = "全域熱鍵尚未授權；可直接點 Overlay 的啟用按鈕"; return; }
+        IsEnabled = true; _consecutiveFailures = 0; LastStatus = "已啟用，等待 VLM 原子動作";
+        logger?.Write("automation.enabled", new { source = "Qwen3-VL" });
     }
 
-    public void Disable(string reason = "自動操作已關閉")
+    public void Disable(string reason = "自動操作已停止")
     {
-        IsEnabled = false;
-        LastStatus = reason;
+        IsEnabled = false; LastStatus = reason;
         logger?.Write("automation.disabled", new { reason });
     }
 
-    public void Toggle()
-    {
-        if (IsEnabled) Disable(); else Enable();
-    }
+    public void Toggle(bool requireDashboardPermission = true)
+    { if (IsEnabled) Disable(); else Enable(requireDashboardPermission); }
 
     public void Handle(LiveCoachUpdate update, DateTimeOffset now)
     {
-        if (!IsEnabled) return;
+        var decision = update.Plan?.VisualDecision;
+        if (!IsEnabled)
+        {
+            LastStatus = decision is null ? "預演：等待 VLM 決策" : $"預演：{Describe(decision.Action)}";
+            return;
+        }
         if (!update.IsConnected || update.Lifecycle != GameLifecycleState.GameActive)
-        {
-            LastStatus = update.Lifecycle == GameLifecycleState.GamePaused
-                ? "遊戲暫停，自動操作待命"
-                : "等待可靠的遊戲狀態";
-            return;
-        }
-        var economy = AutomationPolicy.DecideEconomy(update.State);
-        var currentPopulation = update.State?.Population?.Value;
-        if (_populationAtLastVillagerQueue is not null && currentPopulation != _populationAtLastVillagerQueue)
-        {
-            _populationAtLastVillagerQueue = null;
-        }
-        if (now - _lastEconomyAction >= TimeSpan.FromMilliseconds(settings.EconomyActionIntervalMilliseconds))
-        {
-            if (economy.Kind == AutomationActionKind.QueueVillager)
-            {
-                if (_populationAtLastVillagerQueue == currentPopulation &&
-                    now - _lastVillagerQueueAt < TimeSpan.FromSeconds(45))
-                {
-                    SetWaitingStatus("村民已排入，等待人口變化後再操作");
-                }
-                else
-                {
-                    try
-                    {
-                        var sent = _input.TrySend(settings.VillagerProductionSequence, out var status);
-                        LastStatus = $"經濟：{status}";
-                        logger?.Write("automation.economy", new { sequence = settings.VillagerProductionSequence, sent, status });
-                        if (sent)
-                        {
-                            _populationAtLastVillagerQueue = currentPopulation;
-                            _lastVillagerQueueAt = now;
-                        }
-                    }
-                    catch (Exception exception)
-                    {
-                        LastStatus = $"經濟輸入失敗：{exception.Message}";
-                        logger?.Write("automation.failure", new { scope = "economy", type = exception.GetType().Name, exception.Message });
-                    }
-                    _lastEconomyAction = now;
-                }
-            }
-            else
-            {
-                SetWaitingStatus(economy.Reason);
-            }
-        }
+        { Disable("遊戲不在 Active 狀態，已自動停止"); return; }
+        if (decision is null) { Fail("VLM 沒有可用決策"); return; }
+        if (update.Plan!.ExpiresAt <= now || decision.Confidence < 0.65)
+        { Fail("VLM 決策過期或信心不足"); return; }
+        if (_executedPlans.Contains(update.Plan.PlanId)) return;
+        if (now - _lastActionAt < TimeSpan.FromMilliseconds(500)) return;
+        while (_recentActions.TryPeek(out var at) && now - at > TimeSpan.FromMinutes(1)) _recentActions.Dequeue();
+        if (_recentActions.Count >= 30) { Fail("每分鐘原子操作上限已達 30 次"); return; }
+        if (!Safe(decision.Action, out var unsafeReason)) { Fail(unsafeReason); return; }
 
-        HandleStrategicAction(update, now);
-
-        var military = AutomationPolicy.EnabledMilitarySequences(settings);
-        if (!settings.EnableMilitaryAutomation || military.Count == 0 ||
-            now - _lastMilitaryAction < TimeSpan.FromMilliseconds(settings.MilitaryActionIntervalMilliseconds)) return;
-        if (update.VisionConfidence < 0.65 || update.UnavailableFields > 3)
+        if (decision.Action.Tool is VisualToolKind.Observe or VisualToolKind.Wait)
         {
-            LastStatus = "軍事待命：HUD 整體信心不足";
+            _executedPlans.Add(update.Plan.PlanId);
+            LastStatus = decision.Action.Tool == VisualToolKind.Wait ? "VLM 決定等待" : "VLM 決定重新觀察";
+            LastPlanningEvent = new("visual_observe", $"{decision.Assessment}；{decision.ExpectedResult}", now);
             return;
         }
 
-        var sequence = military[_militarySequenceIndex % military.Count];
-        _militarySequenceIndex++;
-        try
+        var sent = decision.Action.Tool switch
         {
-            var sent = _input.TrySend(sequence, out var militaryStatus);
-            LastStatus = $"軍事：{militaryStatus}";
-            logger?.Write("automation.military", new { sequence, sent, status = militaryStatus });
-        }
-        catch (Exception exception)
-        {
-            LastStatus = $"軍事輸入失敗：{exception.Message}";
-            logger?.Write("automation.failure", new { scope = "military", type = exception.GetType().Name, exception.Message });
-        }
-        _lastMilitaryAction = now;
-    }
-
-    private void HandleStrategicAction(LiveCoachUpdate update, DateTimeOffset now)
-    {
-        if (_pendingAction is not null)
-        {
-            if (IsConfirmed(_pendingAction, update.State))
-            {
-                if (_pendingAction.Kind == EconomicActionKind.BuildMarket) _marketConfirmed = true;
-                if (_pendingAction.Kind == EconomicActionKind.BuildBlacksmith) _blacksmithConfirmed = true;
-                logger?.Write("automation.confirmed", new { action = _pendingAction.Kind.ToString() });
-                _pendingAction = null;
-            }
-            else if (now < _pendingAction.Deadline)
-            {
-                LastStatus = $"確認中：{_pendingAction.Kind}";
-                return;
-            }
-            else
-            {
-                logger?.Write("automation.timeout", new { action = _pendingAction.Kind.ToString() });
-                _pendingAction = null;
-            }
-        }
-
-        if (now - _lastStrategicAction < TimeSpan.FromMilliseconds(settings.StrategicActionIntervalMilliseconds)) return;
-        var action = _planner.Decide(update.State, update.World, _marketConfirmed, _blacksmithConfirmed);
-        if (action.Kind is EconomicActionKind.Wait or EconomicActionKind.QueueVillager)
-        {
-            if (action.Kind == EconomicActionKind.Wait) SetWaitingStatus(action.Reason);
-            return;
-        }
-
-        try
-        {
-            var sent = Execute(action, out var status);
-            LastStatus = $"策略：{action.Reason} · {status}";
-            logger?.Write("automation.strategy", new { action = action.Kind.ToString(), sent, status });
-            _lastStrategicAction = now;
-            if (sent && action.Confirmation is not null)
-            {
-                _pendingAction = new PendingAction(
-                    action.Kind,
-                    update.State?.Wood?.Value,
-                    update.State?.PopulationCap?.Value,
-                    now.AddSeconds(action.Kind is EconomicActionKind.AdvanceFeudal or EconomicActionKind.AdvanceCastle ? 150 : 45));
-            }
-        }
-        catch (Exception exception)
-        {
-            LastStatus = $"策略輸入失敗：{exception.Message}";
-            logger?.Write("automation.failure", new { scope = "strategy", action = action.Kind.ToString(), type = exception.GetType().Name, exception.Message });
-            _lastStrategicAction = now;
-        }
-    }
-
-    private bool Execute(EconomicAction action, out string status)
-    {
-        if ((action.Kind is EconomicActionKind.GatherFood or EconomicActionKind.GatherWood or
-            EconomicActionKind.GatherGold or EconomicActionKind.BuildHouse or
-            EconomicActionKind.BuildMarket or EconomicActionKind.BuildBlacksmith) &&
-            action.Target?.IsActionable != true)
-        {
-            status = "目標未通過操作證據 Gate，未送出輸入";
-            return false;
-        }
-
-        return action.Kind switch
-        {
-            EconomicActionKind.GatherFood or EconomicActionKind.GatherWood or EconomicActionKind.GatherGold =>
-                _input.TrySendThenClick(settings.IdleVillagerSelectionSequence, action.Target!.X, action.Target.Y, rightClick: true, out status),
-            EconomicActionKind.BuildHouse => _input.TrySendThenClick(
-                Join(settings.IdleVillagerSelectionSequence, settings.HouseBuildSequence), action.Target!.X, action.Target.Y, rightClick: false, out status),
-            EconomicActionKind.BuildMarket => _input.TrySendThenClick(
-                Join(settings.IdleVillagerSelectionSequence, settings.MarketBuildSequence), action.Target!.X, action.Target.Y, rightClick: false, out status),
-            EconomicActionKind.BuildBlacksmith => _input.TrySendThenClick(
-                Join(settings.IdleVillagerSelectionSequence, settings.BlacksmithBuildSequence), action.Target!.X, action.Target.Y, rightClick: false, out status),
-            EconomicActionKind.AdvanceFeudal => _input.TrySend(settings.FeudalUpgradeSequence, out status),
-            EconomicActionKind.AdvanceCastle => _input.TrySend(settings.CastleUpgradeSequence, out status),
-            _ => ReturnUnsupported(action.Kind, out status),
+            VisualToolKind.KeySequence => _input.TrySend(string.Join(',', decision.Action.Keys), out _),
+            VisualToolKind.LeftClick => _input.TryClick(decision.Action.X, decision.Action.Y, false, out _),
+            VisualToolKind.RightClick => _input.TryClick(decision.Action.X, decision.Action.Y, true, out _),
+            VisualToolKind.Drag => _input.TryDrag(decision.Action.X, decision.Action.Y,
+                decision.Action.EndX, decision.Action.EndY, out _),
+            _ => false,
         };
+        if (!sent) { Fail("Windows 輸入後端拒絕動作"); return; }
+
+        _executedPlans.Add(update.Plan.PlanId); _lastActionAt = now; _consecutiveFailures = 0;
+        _recentActions.Enqueue(now);
+        LastStatus = $"已執行：{Describe(decision.Action)}；等待 VLM 看新畫面";
+        LastPlanningEvent = new("visual_action_sent",
+            $"{Describe(decision.Action)}；預期：{decision.ExpectedResult}", now);
+        logger?.Write("automation.sent", new { update.Plan.PlanId, decision.Action.Tool, decision.Action.Keys,
+            decision.Action.X, decision.Action.Y, decision.ExpectedResult });
     }
 
-    private static bool IsConfirmed(PendingAction pending, GameState? state) => pending.Kind switch
+    public PlanningEvent? ConsumePlanningEvent()
+    { var result = LastPlanningEvent; LastPlanningEvent = null; return result; }
+
+    private void Fail(string reason)
     {
-        EconomicActionKind.BuildHouse => state?.PopulationCap?.IsUsable == true && state.PopulationCap.Value > pending.PopulationCap,
-        EconomicActionKind.BuildMarket or EconomicActionKind.BuildBlacksmith =>
-            state?.Wood?.IsUsable == true && pending.Wood is not null && state.Wood.Value <= pending.Wood - 80,
-        EconomicActionKind.AdvanceFeudal => state?.Age is GameAge.Feudal or GameAge.Castle or GameAge.Imperial,
-        EconomicActionKind.AdvanceCastle => state?.Age is GameAge.Castle or GameAge.Imperial,
-        _ => true,
+        _consecutiveFailures++; LastStatus = $"已阻擋：{reason}（{_consecutiveFailures}/3）";
+        if (_consecutiveFailures >= 3) Disable($"連續三次無法安全決策：{reason}");
+    }
+
+    private static bool Safe(VisualToolAction action, out string reason)
+    {
+        reason = "";
+        if (action.Tool == VisualToolKind.KeySequence)
+        {
+            try { foreach (var chord in action.Keys) _ = AgePilot.Core.Automation.InputSequence.Parse(chord); }
+            catch (Exception ex) { reason = ex.Message; return false; }
+            return action.Keys.Count is > 0 and <= 6;
+        }
+        static bool Point(double x, double y) => x is >= 0.01 and <= 0.99 && y is >= 0.065 and <= 0.99;
+        if (action.Tool is VisualToolKind.LeftClick or VisualToolKind.RightClick && !Point(action.X, action.Y))
+        { reason = "點擊座標位於 HUD 或視窗邊界"; return false; }
+        if (action.Tool == VisualToolKind.Drag && (!Point(action.X, action.Y) || !Point(action.EndX, action.EndY) ||
+            Math.Sqrt(Math.Pow(action.EndX - action.X, 2) + Math.Pow(action.EndY - action.Y, 2)) > 0.6))
+        { reason = "拖曳座標或距離超出安全範圍"; return false; }
+        return true;
+    }
+
+    private static string Describe(VisualToolAction action) => action.Tool switch
+    {
+        VisualToolKind.KeySequence => $"按鍵 {string.Join(',', action.Keys)}",
+        VisualToolKind.LeftClick => $"左鍵 {action.X:P0},{action.Y:P0}",
+        VisualToolKind.RightClick => $"右鍵 {action.X:P0},{action.Y:P0}",
+        VisualToolKind.Drag => $"拖曳 {action.X:P0},{action.Y:P0} → {action.EndX:P0},{action.EndY:P0}",
+        _ => action.Tool.ToString(),
     };
-
-    private static string Join(string first, string second) => $"{first},{second}";
-
-    private static bool ReturnUnsupported(EconomicActionKind kind, out string status)
-    {
-        status = $"不支援的策略動作：{kind}";
-        return false;
-    }
-
-    private void SetWaitingStatus(string reason)
-    {
-        LastStatus = $"經濟待命：{reason}";
-        if (reason == _lastWaitingReason) return;
-        _lastWaitingReason = reason;
-        logger?.Write("automation.waiting", new { reason });
-    }
-
-    private sealed record PendingAction(EconomicActionKind Kind, int? Wood, int? PopulationCap, DateTimeOffset Deadline);
 }

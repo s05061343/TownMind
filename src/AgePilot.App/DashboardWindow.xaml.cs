@@ -11,6 +11,10 @@ using System.Text.Json;
 using AgePilot.Infrastructure.Diagnostics;
 using AgePilot.Infrastructure.Planning;
 using AgePilot.Core.Planning;
+using AgePilot.Core;
+using AgePilot.Core.History;
+using AgePilot.Vision.Images;
+using AgePilot.Vision.Geometry;
 using System.ComponentModel;
 using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
@@ -78,6 +82,7 @@ public partial class DashboardWindow : Window
         OpacitySlider.Value = _settings.OverlayOpacity;
         SessionRecordingCheck.IsChecked = _settings.EnableSessionRecording;
         LocalDiagnosticsCheck.IsChecked = _settings.EnableLocalDiagnostics;
+        AutomationInputCheck.IsChecked = _settings.EnableAutomationInput;
         AutomationStartHotKeyText.Text = _settings.AutomationStartHotKey;
         AutomationStopHotKeyText.Text = _settings.AutomationStopHotKey;
         VillagerSequenceText.Text = _settings.VillagerProductionSequence;
@@ -93,6 +98,7 @@ public partial class DashboardWindow : Window
         CastleUpgradeSequenceText.Text = _settings.CastleUpgradeSequence;
         LlamaRuntimePathText.Text = _settings.LlamaRuntimePath;
         LlmModelPathText.Text = _settings.LlmModelPath;
+        VisionProjectorPathText.Text = _settings.VisionProjectorPath;
         SetLlmStatus(PlannerRuntimeStatus.NotConfigured("尚未測試；啟動 Overlay 後會自動載入"));
         ScanIntervalCombo.SelectedItem = ScanIntervalCombo.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(item => item.Content?.ToString() == _settings.ScanIntervalMilliseconds.ToString());
@@ -134,6 +140,17 @@ public partial class DashboardWindow : Window
         if (dialog.ShowDialog(this) == true) LlmModelPathText.Text = dialog.FileName;
     }
 
+    private void OnBrowseVisionProjector(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "選擇 Qwen3-VL mmproj GGUF",
+            Filter = "GGUF 視覺編碼器 (*.gguf)|*.gguf|所有檔案 (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) == true) VisionProjectorPathText.Text = dialog.FileName;
+    }
+
     private async void OnTestLlm(object sender, RoutedEventArgs e)
     {
         TestLlmButton.IsEnabled = false;
@@ -144,7 +161,25 @@ public partial class DashboardWindow : Window
             using var planner = new LlamaServerPlanner(candidate,
                 candidate.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(190));
-            SetLlmStatus(await planner.CheckReadyAsync(timeout.Token));
+            var ready = await planner.CheckReadyAsync(timeout.Token);
+            if (ready.Phase != PlannerRuntimePhase.Ready) { SetLlmStatus(ready); return; }
+            var window = new WindowsGameWindowLocator().Find();
+            if (window is null)
+            {
+                SetLlmStatus(new(PlannerRuntimePhase.Ready, $"{ready.Message}；啟動遊戲後才能測試圖片理解", ready.Backend));
+                return;
+            }
+            var frame = await new WindowsGdiFrameCapture().CaptureAsync(window, timeout.Token);
+            var images = VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
+                new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33),
+                new NormalizedRect(0, 0, 0.45, 0.06));
+            var now = DateTimeOffset.UtcNow;
+            var result = await planner.PlanAsync(new SituationContext(new GameState(),
+                GameHistorySummarizer.Summarize(new GameHistory(), TimeSpan.FromSeconds(1), now), null, null, [], now,
+                new VisualObservation(frame.Width, frame.Height, images, "AOE2 screenshot vision readiness test", null, null)), timeout.Token);
+            SetLlmStatus(result.Success && result.Plan?.VisualDecision is not null
+                ? new(PlannerRuntimePhase.Ready, $"VLM 圖片理解已就緒：{result.Plan.VisualDecision.Assessment}", ready.Backend)
+                : new(PlannerRuntimePhase.Error, $"VLM 圖片測試失敗：{result.Error}", ready.Backend));
         }
         catch (OperationCanceledException) { SetLlmStatus(new(PlannerRuntimePhase.Error, "LLM 測試逾時")); }
         catch (Exception exception) { SetLlmStatus(new(PlannerRuntimePhase.Error, exception.Message)); }
@@ -238,6 +273,7 @@ public partial class DashboardWindow : Window
             ScanIntervalMilliseconds = int.TryParse(intervalText, out var interval) ? interval : 500,
             EnableSessionRecording = SessionRecordingCheck.IsChecked == true,
             EnableLocalDiagnostics = LocalDiagnosticsCheck.IsChecked == true,
+            EnableAutomationInput = AutomationInputCheck.IsChecked == true,
             AutomationStartHotKey = AutomationStartHotKeyText.Text.Trim(),
             AutomationStopHotKey = AutomationStopHotKeyText.Text.Trim(),
             VillagerProductionSequence = VillagerSequenceText.Text.Trim(),
@@ -257,6 +293,7 @@ public partial class DashboardWindow : Window
             EnableLocalPlanning = _settings.EnableLocalPlanning,
             LlamaRuntimePath = LlamaRuntimePathText.Text.Trim(),
             LlmModelPath = LlmModelPathText.Text.Trim(),
+            VisionProjectorPath = VisionProjectorPathText.Text.Trim(),
             LlmBackend = _settings.LlmBackend,
             LlmPort = _settings.LlmPort,
             LlmContextSize = _settings.LlmContextSize,

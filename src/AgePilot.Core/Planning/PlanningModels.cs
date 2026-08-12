@@ -39,12 +39,43 @@ public sealed record SituationContext(
     MapContext? Map,
     GamePlan? PreviousPlan,
     IReadOnlyList<PlanningEvent> RecentEvents,
-    DateTimeOffset CapturedAt);
+    DateTimeOffset CapturedAt,
+    VisualObservation? Visual = null);
+
+public sealed record VisualImage(string Name, string MimeType, byte[] Data);
+
+public sealed record VisualObservation(
+    int FrameWidth,
+    int FrameHeight,
+    IReadOnlyList<VisualImage> Images,
+    string UiLayout,
+    string? PreviousAction,
+    string? PreviousResult);
+
+public enum VisualToolKind { Observe, Wait, KeySequence, LeftClick, RightClick, Drag }
+
+public sealed record VisualToolAction(
+    VisualToolKind Tool,
+    IReadOnlyList<string> Keys,
+    double X = 0,
+    double Y = 0,
+    double EndX = 0,
+    double EndY = 0);
+
+public sealed record VisualPlayerDecision(
+    string Assessment,
+    string Goal,
+    string Reason,
+    VisualToolAction Action,
+    string ExpectedResult,
+    int RecheckAfterMs,
+    double Confidence);
 
 public enum PlannedActionKind
 {
     QueueVillager, BuildHouse, GatherFood, GatherWood, GatherGold,
     AdvanceFeudal, AdvanceCastle, DevelopWaterEconomy, Scout, Wait, Reobserve,
+    QueueUnit, AssignWorkers, BuildBuilding, ResearchTechnology, AdvanceAge,
 }
 
 public sealed record PlanCondition(string Field, string Operator, string Value);
@@ -63,7 +94,8 @@ public sealed record PlannedAction(
     int RecheckSeconds = 20,
     string SuccessCondition = "",
     IReadOnlyList<PlanCondition>? Preconditions = null,
-    IReadOnlyList<PlanCondition>? CompletionConditions = null);
+    IReadOnlyList<PlanCondition>? CompletionConditions = null,
+    string TargetId = "");
 
 public sealed record GamePlan(
     string PlanId,
@@ -76,7 +108,8 @@ public sealed record GamePlan(
     IReadOnlyList<string> Assumptions,
     IReadOnlyList<string> MissingInformation,
     IReadOnlyList<PlannedAction> Actions,
-    bool ReusedAfterPlanningFailure = false);
+    bool ReusedAfterPlanningFailure = false,
+    VisualPlayerDecision? VisualDecision = null);
 
 public sealed record PlanningResult(GamePlan? Plan, string? Error = null)
 {

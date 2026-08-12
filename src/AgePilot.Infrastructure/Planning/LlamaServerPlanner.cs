@@ -50,6 +50,16 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_settings.LlmPlanningTimeoutSeconds));
             var started = Stopwatch.StartNew();
+            var userContent = new List<object>();
+            if (context.Visual is { } visual)
+            {
+                userContent.AddRange(visual.Images.Select(image => (object)new
+                {
+                    type = "image_url",
+                    image_url = new { url = $"data:{image.MimeType};base64,{Convert.ToBase64String(image.Data)}" },
+                }));
+            }
+            userContent.Add(new { type = "text", text = JsonSerializer.Serialize(ToPromptContext(context), JsonOptions) });
             var request = new
             {
                 model = "agepilot-local",
@@ -58,7 +68,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                 messages = new object[]
                 {
                     new { role = "system", content = SystemPrompt },
-                    new { role = "user", content = JsonSerializer.Serialize(ToPromptContext(context), JsonOptions) },
+                    new { role = "user", content = userContent.ToArray() },
                 },
                 response_format = ResponseFormat,
             };
@@ -70,16 +80,16 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
                 ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
             var now = DateTimeOffset.UtcNow;
-            var action = new PlannedAction(dto.NextAction.Intent, Math.Max(50, dto.NextAction.Priority), dto.NextAction.Reason,
-                dto.NextAction.Quantity, dto.NextAction.TargetPopulationCap,
-                dto.NextAction.TargetFoodWorkers, dto.NextAction.TargetWoodWorkers,
-                dto.NextAction.TargetGoldWorkers, dto.NextAction.TargetStoneWorkers,
-                dto.NextAction.TargetResourceAmount, dto.NextAction.RecheckSeconds,
-                dto.NextAction.SuccessCondition, [], []);
-            action = NormalizeQuantities(action, context.State, context.Map);
+            var toolAction = new VisualToolAction(dto.Action.Tool, dto.Action.Keys ?? [], dto.Action.X, dto.Action.Y,
+                dto.Action.EndX, dto.Action.EndY);
+            var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, toolAction,
+                dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence);
+            var action = new PlannedAction(PlannedActionKind.Reobserve, 80, dto.Reason,
+                RecheckSeconds: Math.Clamp((int)Math.Ceiling(dto.RecheckAfterMs / 1000d), 5, 30),
+                SuccessCondition: dto.ExpectedResult);
             var plan = new GamePlan(Guid.NewGuid().ToString("N"), now, now.AddSeconds(60),
-                dto.Strategy, dto.CurrentGoal, dto.Reason, dto.Confidence,
-                [], [], [action]);
+                "visual-player", dto.Goal, dto.Reason, dto.Confidence,
+                [], [], [action], VisualDecision: decision);
             var validated = GamePlanValidator.Validate(plan, now);
             _logger?.Write("planning.completed", new { backend = _backend, latencyMs = started.ElapsedMilliseconds, validated = validated.Success, validated.Error });
             SetStatus(validated.Success ? PlannerRuntimePhase.Ready : PlannerRuntimePhase.Error,
@@ -166,11 +176,17 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             return;
         }
         var model = Resolve(_settings.LlmModelPath);
+        var mmproj = Resolve(_settings.VisionProjectorPath);
         var runtime = Resolve(_settings.LlamaRuntimePath);
         if (!File.Exists(model))
         {
             SetStatus(PlannerRuntimePhase.NotConfigured, $"找不到模型：{model}");
             throw new FileNotFoundException("找不到本機 LLM 模型", model);
+        }
+        if (!File.Exists(mmproj))
+        {
+            SetStatus(PlannerRuntimePhase.NotConfigured, $"找不到視覺編碼器：{mmproj}");
+            throw new FileNotFoundException("找不到本機 VLM mmproj", mmproj);
         }
         SetStatus(PlannerRuntimePhase.Starting, "正在啟動 llama-server");
         var backends = _settings.LlmBackend == "auto" ? new[] { "hip", "vulkan" } : new[] { _settings.LlmBackend };
@@ -187,7 +203,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                 {
                     FileName = executable,
                     WorkingDirectory = Path.GetDirectoryName(executable)!,
-                    Arguments = $"-m \"{model}\" --host 127.0.0.1 --port {_settings.LlmPort} -c {_settings.LlmContextSize} --n-gpu-layers {_settings.LlmGpuLayers} --cache-ram 0 --alias agepilot-local --jinja -np 1 --device {device}",
+                    Arguments = $"-m \"{model}\" --mmproj \"{mmproj}\" --mmproj-offload --image-min-tokens 1024 --image-max-tokens 1024 --host 127.0.0.1 --port {_settings.LlmPort} -c {_settings.LlmContextSize} --n-gpu-layers {_settings.LlmGpuLayers} --cache-ram 0 --alias agepilot-local --jinja -np 1 --device {device}",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -301,6 +317,15 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         map = context.Map?.IsUsable == true ? context.Map : null,
         previousPlan = context.PreviousPlan is null ? null : new { context.PreviousPlan.Strategy, context.PreviousPlan.CurrentGoal },
         events = context.RecentEvents,
+        visual = context.Visual is null ? null : new
+        {
+            context.Visual.FrameWidth,
+            context.Visual.FrameHeight,
+            imageOrder = context.Visual.Images.Select(image => image.Name),
+            context.Visual.UiLayout,
+            context.Visual.PreviousAction,
+            context.Visual.PreviousResult,
+        },
     };
 
     private static object? Value(AgePilot.Core.Observations.ObservedValue<int>? value) => value?.IsUsable == true
@@ -348,7 +373,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     private const string SystemPrompt = """
 /no_think
-你是 AOE2 DE 的冷靜本機策略規劃器。只根據提供的結構化觀測，為未來 1 至 2 分鐘規劃經濟、住房、採集、升封建/城堡與地圖策略。未知資料不得猜測。不要輸出思考過程。嚴格依指定 JSON schema 輸出策略、目標、原因、信心與一個最高優先度下一步。下一步必須包含具體數量、人口上限目標、食物/木材/黃金/石頭的村民目標配置、資源存量檢查點、重新評估秒數與可觀察的完成條件；不適用的數值填 0。資源人數是目標配置，不得宣稱是目前實測人數。不得輸出座標、按鍵、軍事命令或 Markdown。
+你是資深、謹慎的 AOE2 DE 玩家，完整遊戲截圖是主要觀測；OCR 與小地圖摘要只是輔助證據。先辨認當前 UI 模式（未選取、單位／建築已選取、建築選單、建築放置、研究／生產中），再決定只推進一個 UI 狀態的下一步。每次只能輸出一個原子工具：Observe、Wait、KeySequence、LeftClick、RightClick 或 Drag。Goal 與 ExpectedResult 都只能描述這一個原子操作的直接結果，不得宣稱一次點擊會完成多棟建築、多項研究或整套策略。紅色建築預覽代表目前游標落點非法，不可在紅色預覽內左鍵確認；可點另一個明顯空曠位置或取消後重看。不要虛構 AOE2 機制（例如市場不會直接提高採集收入），不要因長期目標忽略目前正在進行的放置／選取狀態。座標是整個遊戲視窗的 normalized [0,1] 座標。按鍵陣列每項是一個 chord，例如 H、Ctrl+H；不得輸出腳本、作業系統命令或多步巨集。若不確定、畫面矛盾、尚需等待或上一動作結果不明，選 Observe 或 Wait。不要輸出思考過程或 Markdown，嚴格依 JSON schema 回覆。
 """;
 
     private static readonly object ResponseFormat = new
@@ -362,38 +387,32 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             {
                 ["type"] = "object",
                 ["additionalProperties"] = false,
-                ["required"] = new[] { "strategy", "currentGoal", "reason", "confidence", "nextAction" },
+                ["required"] = new[] { "assessment", "goal", "reason", "confidence", "action", "expectedResult", "recheckAfterMs" },
                 ["properties"] = new Dictionary<string, object>
                 {
-                    ["strategy"] = new { type = "string" },
-                    ["currentGoal"] = new { type = "string" },
+                    ["assessment"] = new { type = "string" },
+                    ["goal"] = new { type = "string" },
                     ["reason"] = new { type = "string" },
                     ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
-                    ["nextAction"] = new Dictionary<string, object>
+                    ["expectedResult"] = new { type = "string" },
+                    ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
+                    ["action"] = new Dictionary<string, object>
                     {
                         ["type"] = "object",
                         ["additionalProperties"] = false,
-                        ["required"] = new[] { "intent", "priority", "reason", "quantity", "targetPopulationCap",
-                            "targetFoodWorkers", "targetWoodWorkers", "targetGoldWorkers", "targetStoneWorkers",
-                            "targetResourceAmount", "recheckSeconds", "successCondition" },
+                        ["required"] = new[] { "tool", "keys", "x", "y", "endX", "endY" },
                         ["properties"] = new Dictionary<string, object>
                         {
-                            ["intent"] = new Dictionary<string, object>
+                            ["tool"] = new Dictionary<string, object>
                             {
                                 ["type"] = "string",
-                                ["enum"] = Enum.GetNames<PlannedActionKind>(),
+                                ["enum"] = Enum.GetNames<VisualToolKind>(),
                             },
-                            ["priority"] = new { type = "integer", minimum = 0, maximum = 100 },
-                            ["reason"] = new { type = "string" },
-                            ["quantity"] = new { type = "integer", minimum = 0, maximum = 20 },
-                            ["targetPopulationCap"] = new { type = "integer", minimum = 0, maximum = 500 },
-                            ["targetFoodWorkers"] = new { type = "integer", minimum = 0, maximum = 200 },
-                            ["targetWoodWorkers"] = new { type = "integer", minimum = 0, maximum = 200 },
-                            ["targetGoldWorkers"] = new { type = "integer", minimum = 0, maximum = 200 },
-                            ["targetStoneWorkers"] = new { type = "integer", minimum = 0, maximum = 200 },
-                            ["targetResourceAmount"] = new { type = "integer", minimum = 0, maximum = 100000 },
-                            ["recheckSeconds"] = new { type = "integer", minimum = 5, maximum = 120 },
-                            ["successCondition"] = new { type = "string" },
+                            ["keys"] = new { type = "array", maxItems = 6, items = new { type = "string", maxLength = 16 } },
+                            ["x"] = new { type = "number", minimum = 0, maximum = 1 },
+                            ["y"] = new { type = "number", minimum = 0, maximum = 1 },
+                            ["endX"] = new { type = "number", minimum = 0, maximum = 1 },
+                            ["endY"] = new { type = "number", minimum = 0, maximum = 1 },
                         },
                     },
                 },
@@ -404,18 +423,8 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private sealed record CompletionEnvelope(IReadOnlyList<CompletionChoice> Choices);
     private sealed record CompletionChoice(CompletionMessage Message);
     private sealed record CompletionMessage(string Content);
-    private sealed record PlanDto(string Strategy, string CurrentGoal, string Reason, double Confidence, NextActionDto NextAction);
-    private sealed record NextActionDto(
-        PlannedActionKind Intent,
-        int Priority,
-        string Reason,
-        int Quantity,
-        int TargetPopulationCap,
-        int TargetFoodWorkers,
-        int TargetWoodWorkers,
-        int TargetGoldWorkers,
-        int TargetStoneWorkers,
-        int TargetResourceAmount,
-        int RecheckSeconds,
-        string SuccessCondition);
+    private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence,
+        VisualActionDto Action, string ExpectedResult, int RecheckAfterMs);
+    private sealed record VisualActionDto(VisualToolKind Tool, IReadOnlyList<string>? Keys,
+        double X, double Y, double EndX, double EndY);
 }

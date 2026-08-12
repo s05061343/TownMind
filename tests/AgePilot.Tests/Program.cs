@@ -65,6 +65,10 @@ var tests = new (string Name, Action Run)[]
     ("Quantified plan becomes concrete recommendation", QuantifiedPlanBecomesConcreteRecommendation),
     ("LLM quantities are corrected by observed game state", LlmQuantitiesAreCorrectedByGameState),
     ("AOE2 installation hotkeys are parsed read only", Aoe2InstallationHotkeysAreParsed),
+    ("GamePlan generic development actions translate safely", GenericDevelopmentActionsTranslateSafely),
+    ("Plan execution requires arming and is idempotent", PlanExecutionRequiresArmingAndIsIdempotent),
+    ("Visual prompt encoder creates panorama and UI crops", VisualPromptEncoderCreatesImages),
+    ("Visual player decision rejects unsafe coordinates and keys", VisualDecisionRejectsUnsafeValues),
 };
 
 var failures = 0;
@@ -755,6 +759,72 @@ static void LlmQuantitiesAreCorrectedByGameState()
         new MapContext(MapArchetype.Island, 0.6, 0.1, 0.2, 0.5, 2, 0.3, 0.9, ObservationStatus.Confirmed, now, 3));
     Equal(17, allocated.TargetFoodWorkers + allocated.TargetWoodWorkers + allocated.TargetGoldWorkers + allocated.TargetStoneWorkers);
     Equal(true, allocated.TargetWoodWorkers > allocated.TargetGoldWorkers);
+}
+
+static void GenericDevelopmentActionsTranslateSafely()
+{
+    var now = DateTimeOffset.UtcNow;
+    var bindings = new DevelopmentActionBindings("H,Q", ".",
+        new Dictionary<string, string> { ["barracks"] = "B,B" },
+        new Dictionary<string, string> { ["double-bit-axe"] = "L,Q" },
+        new Dictionary<string, string> { ["feudal-age"] = "H,Z" });
+    var building = new GamePlan("build", now, now.AddSeconds(60), "發展", "蓋兵營", "升級前置", 0.9, [], [],
+        [new PlannedAction(PlannedActionKind.BuildBuilding, 90, "升級前置", Quantity: 1, TargetId: "barracks")]);
+    var translated = GamePlanActionTranslator.Translate(building, bindings);
+    Equal(true, translated.Success);
+    Equal(ExecutableActionKind.TargetedLeftClick, translated.Action!.Kind);
+    Equal(WorldTargetKind.OpenBuildArea, translated.Action.TargetKind);
+
+    var unknownTechnology = building with { Actions = [new PlannedAction(
+        PlannedActionKind.ResearchTechnology, 90, "未知科技", TargetId: "invented-tech")] };
+    Equal(false, GamePlanActionTranslator.Translate(unknownTechnology, bindings).Success);
+    Equal(false, GamePlanValidator.Validate(building with { Actions = [new PlannedAction(
+        PlannedActionKind.ResearchTechnology, 90, "缺 ID")] }, now).Success);
+}
+
+static void PlanExecutionRequiresArmingAndIsIdempotent()
+{
+    var now = DateTimeOffset.UtcNow;
+    var action = new ExecutableAction("p:a", "p", PlannedActionKind.QueueVillager,
+        ExecutableActionKind.KeyboardSequence, "H,Q", null, TimeSpan.FromSeconds(10), "人口增加", "生產村民");
+    var coordinator = new PlanExecutionCoordinator();
+    Equal(ActionExecutionPhase.Failed, coordinator.Prepare(action, now, []).Phase);
+    coordinator.Arm();
+    Equal(ActionExecutionPhase.Ready, coordinator.Prepare(action, now, []).Phase);
+    coordinator.MarkSent();
+    Equal(ActionExecutionPhase.AwaitingConfirmation, coordinator.Current!.Phase);
+    Equal(ActionExecutionPhase.Confirmed, coordinator.Observe(true, now.AddSeconds(1))!.Phase);
+    Equal(ActionExecutionPhase.Failed, coordinator.Prepare(action, now.AddSeconds(2), []).Phase);
+}
+
+static void VisualPromptEncoderCreatesImages()
+{
+    var image = BgraImageLoader.Load(FindRepositoryFile("img", "Snipaste_2026-08-12_20-38-47.jpg"));
+    var encoded = VisualPromptImageEncoder.Encode(image.Pixels, image.Width, image.Height,
+        new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33),
+        new NormalizedRect(0, 0, 0.45, 0.06));
+    Equal(4, encoded.Count);
+    Equal("panorama", encoded[0].Name);
+    Equal(true, encoded.All(item => item.MimeType == "image/jpeg" && item.Data.Length > 1000));
+}
+
+static void VisualDecisionRejectsUnsafeValues()
+{
+    var now = DateTimeOffset.UtcNow;
+    var decision = new VisualPlayerDecision("已選村民", "建造兵營", "需要前置建築",
+        new VisualToolAction(VisualToolKind.LeftClick, [], 0.3, 0.4), "出現建築預覽", 1000, 0.9);
+    var plan = new GamePlan("vlm", now, now.AddSeconds(30), "visual-player", decision.Goal, decision.Reason,
+        decision.Confidence, [], [], [new PlannedAction(PlannedActionKind.Reobserve, 80, decision.Reason)],
+        VisualDecision: decision);
+    Equal(true, GamePlanValidator.Validate(plan, now).Success);
+    Equal(false, GamePlanValidator.Validate(plan with { VisualDecision = decision with
+    {
+        Action = decision.Action with { X = 1.2 },
+    } }, now).Success);
+    Equal(false, GamePlanValidator.Validate(plan with { VisualDecision = decision with
+    {
+        Action = new VisualToolAction(VisualToolKind.KeySequence, ["powershell.exe"]),
+    } }, now).Success);
 }
 
 static void Equal<T>(T expected, T actual)

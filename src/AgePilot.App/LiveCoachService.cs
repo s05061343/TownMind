@@ -13,6 +13,8 @@ using AgePilot.Vision.World;
 using AgePilot.Core.Configuration;
 using AgePilot.Core.Planning;
 using AgePilot.Infrastructure.Planning;
+using AgePilot.Vision.Images;
+using AgePilot.Vision.Geometry;
 
 namespace AgePilot.App;
 
@@ -41,6 +43,8 @@ public sealed class LiveCoachService(
     private DateTimeOffset _lastSnapshotAt = DateTimeOffset.MinValue;
     private GameLifecycleState? _lastLoggedLifecycle;
     private string _lastLoggedRecommendations = string.Empty;
+    private string? _previousVisualAction;
+    private string? _previousVisualResult;
 
     public async Task RunAsync(
         Func<LiveCoachUpdate, Task> onUpdate,
@@ -89,11 +93,18 @@ public sealed class LiveCoachService(
                         var state = _estimator.Update(raw, frame.CapturedAt);
                         var world = _worldAnalyzer.Analyze(frame.BgraPixels.ToArray(), frame.Width, frame.Height);
                         var map = _minimapAnalyzer.Analyze(frame.BgraPixels.Span, frame.Width, frame.Height, _profile.MinimapRegion, frame.CapturedAt);
+                        var visual = new VisualObservation(frame.Width, frame.Height,
+                            VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
+                                new NormalizedRect(0, 0.66, 0.47, 0.34),
+                                _profile.MinimapRegion ?? new NormalizedRect(0.80, 0.67, 0.20, 0.33),
+                                new NormalizedRect(0, 0, 0.45, 0.06)),
+                            "top_hud=resources; command_panel=bottom-left; minimap=bottom-right; world=center; do not click top HUD, command panel unless intentionally using its buttons, scoreboard, or overlay",
+                            _previousVisualAction, _previousVisualResult);
                         _history.Add(state, frame.CapturedAt);
                         var health = CalculateVisionHealth(state);
                         var lifecycle = _lifecycle.ObserveFrame(false, 6 - health.UnavailableFields);
                         var planning = lifecycle == GameLifecycleState.GameActive
-                            ? await _strategy.UpdateAsync(state, _history, map, frame.CapturedAt, cancellationToken)
+                            ? await _strategy.UpdateAsync(state, _history, map, frame.CapturedAt, cancellationToken, visual)
                             : _strategy.Pause(frame.CapturedAt, "等待可靠的 Active 遊戲狀態");
                         var activeRecommendations = GamePlanRecommendationAdapter.Convert(planning.Plan);
                         var visibleRecommendations = _recommendationCoordinator.Apply(activeRecommendations);
@@ -210,6 +221,13 @@ public sealed class LiveCoachService(
 
     public void DismissRecommendation(string recommendationId) =>
         _recommendationCoordinator.Dismiss(recommendationId);
+
+    public void ReportExecutionEvent(PlanningEvent executionEvent)
+    {
+        _previousVisualAction = executionEvent.Detail;
+        _previousVisualResult = executionEvent.Kind;
+        _strategy.ReportExecutionEvent(executionEvent);
+    }
 }
 
 public sealed record LiveCoachUpdate(

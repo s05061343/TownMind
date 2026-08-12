@@ -9,6 +9,7 @@ public sealed class AppSettings
     public int ScanIntervalMilliseconds { get; set; } = 500;
     public bool EnableSessionRecording { get; set; } = true;
     public bool EnableLocalDiagnostics { get; set; } = true;
+    public bool EnableAutomationInput { get; set; }
     public string AutomationStartHotKey { get; set; } = "Ctrl+F10";
     public string AutomationStopHotKey { get; set; } = "Ctrl+F12";
     public string VillagerProductionSequence { get; set; } = "H,Q";
@@ -26,7 +27,8 @@ public sealed class AppSettings
     public string CastleUpgradeSequence { get; set; } = "H,X";
     public int StrategicActionIntervalMilliseconds { get; set; } = 12000;
     public bool EnableLocalPlanning { get; set; } = true;
-    public string LlmModelPath { get; set; } = "models/Qwen3-8B-Q4_K_M.gguf";
+    public string LlmModelPath { get; set; } = "models/Qwen3VL-8B-Instruct-Q4_K_M.gguf";
+    public string VisionProjectorPath { get; set; } = "models/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf";
     public string LlamaRuntimePath { get; set; } = ".runtime/llama.cpp";
     public string LlmBackend { get; set; } = "auto";
     public int LlmPort { get; set; } = 18080;
@@ -59,8 +61,8 @@ public sealed class AppSettings
             throw new InvalidDataException("軍事操作間隔必須介於 1000 到 60000 毫秒。");
         if (StrategicActionIntervalMilliseconds is < 1000 or > 60000)
             throw new InvalidDataException("策略操作間隔必須介於 1000 到 60000 毫秒。");
-        if (EnableLocalPlanning && (string.IsNullOrWhiteSpace(LlmModelPath) || string.IsNullOrWhiteSpace(LlamaRuntimePath)))
-            throw new InvalidDataException("本機規劃需要模型與 llama.cpp runtime 路徑。");
+        if (EnableLocalPlanning && (string.IsNullOrWhiteSpace(LlmModelPath) || string.IsNullOrWhiteSpace(VisionProjectorPath) || string.IsNullOrWhiteSpace(LlamaRuntimePath)))
+            throw new InvalidDataException("本機視覺規劃需要主模型、mmproj 與 llama.cpp runtime 路徑。");
         if (LlmBackend is not ("auto" or "hip" or "vulkan"))
             throw new InvalidDataException("LLM backend 必須是 auto、hip 或 vulkan。");
         if (LlmPort is < 1024 or > 65535) throw new InvalidDataException("LLM port 必須介於 1024 到 65535。");

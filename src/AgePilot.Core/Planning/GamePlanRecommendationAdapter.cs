@@ -23,6 +23,11 @@ public static class GamePlanRecommendationAdapter
         PlannedActionKind.GatherGold => "增加黃金採集",
         PlannedActionKind.AdvanceFeudal => "準備升封建時代",
         PlannedActionKind.AdvanceCastle => "準備升城堡時代",
+        PlannedActionKind.QueueUnit => $"生產 {DisplayId(action.TargetId)} ×{Math.Max(1, action.Quantity)}",
+        PlannedActionKind.AssignWorkers => "調整資源工作人口",
+        PlannedActionKind.BuildBuilding => $"建造 {DisplayId(action.TargetId)} ×{Math.Max(1, action.Quantity)}",
+        PlannedActionKind.ResearchTechnology => $"研發 {DisplayId(action.TargetId)}",
+        PlannedActionKind.AdvanceAge => $"準備升級 {DisplayId(action.TargetId)}",
         PlannedActionKind.DevelopWaterEconomy => "發展水上經濟",
         PlannedActionKind.Scout => "持續偵察",
         PlannedActionKind.Reobserve => "等待更多戰場資訊",
@@ -44,4 +49,6 @@ public static class GamePlanRecommendationAdapter
         parts.Add($"約 {action.RecheckSeconds} 秒後重新評估");
         return string.Join("\n", parts);
     }
+
+    private static string DisplayId(string id) => string.IsNullOrWhiteSpace(id) ? "未指定目標" : id;
 }

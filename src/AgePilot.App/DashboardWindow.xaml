@@ -54,7 +54,15 @@
                 <TextBox x:Name="LlmModelPathText" Padding="7" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
                 <Button Grid.Column="1" Content="選擇模型" Click="OnBrowseLlmModel" Padding="12,6" Margin="8,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
             </Grid>
+            <TextBlock Text="視覺編碼器 mmproj" Foreground="#9FA695"/>
+            <Grid Margin="0,5,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="VisionProjectorPathText" Padding="7" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                <Button Grid.Column="1" Content="選擇 mmproj" Click="OnBrowseVisionProjector" Padding="12,6" Margin="8,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+            </Grid>
             <TextBlock Text="以下舊自動操作設定暫時停用。" Foreground="#9FA695" Margin="0,0,0,8"/>
+            <CheckBox x:Name="AutomationInputCheck" Content="允許 Ctrl+F10 從全域熱鍵啟用；Overlay 按鈕仍可直接授權本局（Ctrl+F12 緊急停止）"
+                      Foreground="#EEE9DD" Margin="0,0,0,10"/>
             <Grid IsEnabled="False" Opacity="0.55">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
