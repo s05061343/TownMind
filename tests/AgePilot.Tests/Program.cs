@@ -14,6 +14,7 @@ using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using AgePilot.Vision.Benchmarking;
 using AgePilot.Infrastructure.Diagnostics;
+using AgePilot.Infrastructure.GameData;
 using AgePilot.Core.Automation;
 using AgePilot.Vision.World;
 
@@ -53,6 +54,9 @@ var tests = new (string Name, Action Run)[]
     ("Economy automation queues villager only when safe", EconomyAutomationQueuesVillagerOnlyWhenSafe),
     ("Generic planner covers house and age progression", GenericPlannerCoversHouseAndAgeProgression),
     ("Generic world analyzer finds actionable candidates", GenericWorldAnalyzerFindsCandidates),
+    ("Visual candidates cannot drive player input", VisualCandidatesCannotDriveInput),
+    ("Action execution fails closed and confirms explicitly", ActionExecutionFailsClosedAndConfirms),
+    ("AOE2 installation hotkeys are parsed read only", Aoe2InstallationHotkeysAreParsed),
 };
 
 var failures = 0;
@@ -564,7 +568,7 @@ static void GenericPlannerCoversHouseAndAgeProgression()
 {
     var now = DateTimeOffset.UtcNow;
     var world = new WorldObservation(2560, 1440,
-        [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.8)], 0.8);
+        [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.95, WorldTargetEvidence.Verified, 3)], 0.8);
     var planner = new GenericEconomicPlanner();
     var needsHouse = new GameState
     {
@@ -599,6 +603,64 @@ static void GenericWorldAnalyzerFindsCandidates()
     EqualContext(true, world.Targets.Any(target => target.Kind == WorldTargetKind.Wood), $"world targets [{summary}]");
     EqualContext(true, world.Targets.Any(target => target.Kind == WorldTargetKind.OpenBuildArea), $"world targets [{summary}]");
     Equal(true, world.Targets.All(target => target.X is >= 0 and <= 1 && target.Y is >= 0 and <= 1));
+    Equal(true, world.Targets.All(target => !target.IsActionable));
+}
+
+static void VisualCandidatesCannotDriveInput()
+{
+    var now = DateTimeOffset.UtcNow;
+    var state = new GameState
+    {
+        Age = GameAge.Dark,
+        Food = Confirmed(200, now), Wood = Confirmed(100, now),
+        Population = Confirmed(19, now), PopulationCap = Confirmed(20, now),
+    };
+    var candidateOnly = new WorldObservation(2560, 1440,
+        [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.99)], 0.9);
+    var action = new GenericEconomicPlanner().Decide(state, candidateOnly, false, false);
+    Equal(EconomicActionKind.Wait, action.Kind);
+
+    var verified = candidateOnly with
+    {
+        Targets = [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.95, WorldTargetEvidence.Verified, 3)],
+    };
+    Equal(EconomicActionKind.BuildHouse, new GenericEconomicPlanner().Decide(state, verified, false, false).Kind);
+}
+
+static void ActionExecutionFailsClosedAndConfirms()
+{
+    var now = DateTimeOffset.UtcNow;
+    var blocked = ActionExecutionState.Start("build-house", now, TimeSpan.FromSeconds(5),
+        [new ActionPrecondition("target", false, "目標尚未驗證")]);
+    Equal(ActionExecutionPhase.Failed, blocked.Phase);
+
+    var ready = ActionExecutionState.Start("queue-villager", now, TimeSpan.FromSeconds(5),
+        [new ActionPrecondition("hud", true, "")]);
+    Equal(ActionExecutionPhase.Ready, ready.Phase);
+    var pending = ready.MarkSent();
+    Equal(ActionExecutionPhase.AwaitingConfirmation, pending.Phase);
+    Equal(ActionExecutionPhase.Confirmed, pending.Observe(true, now.AddSeconds(1)).Phase);
+    Equal(ActionExecutionPhase.Failed, pending.Observe(false, now.AddSeconds(6)).Phase);
+}
+
+static void Aoe2InstallationHotkeysAreParsed()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"agepilot-game-data-{Guid.NewGuid():N}");
+    var dat = Path.Combine(root, "resources", "_common", "dat");
+    Directory.CreateDirectory(dat);
+    try
+    {
+        File.WriteAllText(Path.Combine(dat, "hotkeys.json"), """
+        {"shared_hotkey_group_list":[{"hotkey_list":[{"data_name":"SELECT_ALL_TOWN_CENTERS","defaults_list":[{"name":"classic","key":"VK_H"},{"name":"definitive","key":"VK_H","control":true}]}]}]}
+        """);
+        var catalog = Aoe2InstallationCatalog.Load(root);
+        Equal(64, catalog.HotkeysSha256.Length);
+        Equal("Ctrl+H", catalog.DefinitiveHotkeys["SELECT_ALL_TOWN_CENTERS"].ToInputSequence());
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
 }
 
 static void Equal<T>(T expected, T actual)

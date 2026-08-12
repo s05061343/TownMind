@@ -177,6 +177,15 @@ internal sealed class AutomationController(AppSettings settings, LocalJsonLineLo
 
     private bool Execute(EconomicAction action, out string status)
     {
+        if ((action.Kind is EconomicActionKind.GatherFood or EconomicActionKind.GatherWood or
+            EconomicActionKind.GatherGold or EconomicActionKind.BuildHouse or
+            EconomicActionKind.BuildMarket or EconomicActionKind.BuildBlacksmith) &&
+            action.Target?.IsActionable != true)
+        {
+            status = "目標未通過操作證據 Gate，未送出輸入";
+            return false;
+        }
+
         return action.Kind switch
         {
             EconomicActionKind.GatherFood or EconomicActionKind.GatherWood or EconomicActionKind.GatherGold =>

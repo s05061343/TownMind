@@ -68,10 +68,10 @@ public sealed class GenericEconomicPlanner
         WorldTargetKind targetKind,
         string? confirmation = null)
     {
-        var target = world?.Best(targetKind);
-        return target is { Confidence: >= 0.55 }
+        var target = world?.BestActionable(targetKind);
+        return target is not null
             ? new(action, reason, target, confirmation)
-            : new(EconomicActionKind.Wait, $"{reason}，但尚未找到可靠的{Format(targetKind)}位置");
+            : new(EconomicActionKind.Wait, $"{reason}，但尚未取得可操作且已驗證的{Format(targetKind)}目標");
     }
 
     private static string Format(WorldTargetKind kind) => kind switch
