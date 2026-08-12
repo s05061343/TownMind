@@ -17,6 +17,9 @@ LLM 不得輸出鍵盤序列、滑鼠座標或逐步控制事件。計畫必須�
 - 模型為 `models/Qwen3-8B-Q4_K_M.gguf`；llama.cpp 位於 `.runtime/llama.cpp`，HIP 優先、Vulkan備援，只監聽 loopback。
 - `.runtime/` 與 GGUF 不進入版本控制或公開套件。
 - Portable 版由 Dashboard 分別選擇 llama.cpp runtime 目錄與 GGUF 模型檔；「測試 LLM」會啟動 backend、等待 health ready，並顯示未設定、啟動中、載入模型、已就緒、規劃中或錯誤狀態。
+- HIP 啟動時會尋找 `ROCM_PATH/bin` 或最新的 `Program Files/AMD/ROCm/*/bin`，注入子程序 PATH，並要求 `--list-devices` 實際回報 `ROCmN`；只有 CPU backend 時視為失敗，不得以 health endpoint 冒充 GPU ready。
+- 第一版模型契約使用 llama.cpp strict JSON schema，只要求策略、目標、原因、信心與一個白名單下一步；執行前置與完成條件由確定性程式持有。
+- 量化提示包含動作數量、人口上限、資源村民目標、資源檢查點與重新評估時間。房屋人口容量及配置總數由可靠觀測確定性校正；實際資源村民尚未被視覺確認前，UI 必須標示為「目標配置（非目前實測）」。
 - 推論失敗可沿用上一份計畫，但建立 60 秒後強制失效。
 - 小地圖第一版只產生水域、森林、開放地形與粗略拓撲；不辨識資源點、敵我單位或地圖名稱。
 - 低覆蓋、未探索或跨幀不一致時回傳 Unknown／Unavailable。

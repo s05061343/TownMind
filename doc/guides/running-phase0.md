@@ -9,6 +9,8 @@ Portable 套件不包含約 5 GB 的 GGUF 模型或 llama.cpp runtime。第一�
 
 按「測試 LLM」後，狀態顯示「已就緒」才代表 backend 與模型成功載入。Overlay 會繼續顯示規劃中、已就緒或具體錯誤；目前版本只提供規劃預覽，不發送遊戲輸入。
 
+HIP 狀態必須顯示實際裝置，例如 `HIP / ROCm0`。若只載入 CPU backend，AgePilot 會拒絕啟動規劃；請確認 AMD ROCm 已安裝，且其 `bin` 目錄包含 `amdhip64_7.dll`。
+
 ## 第一次執行
 
 在 repository root 開啟 PowerShell：

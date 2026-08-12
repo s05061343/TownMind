@@ -273,7 +273,7 @@ static int ShowUsage()
 static async Task<int> PlanSmokeAsync()
 {
     var now = DateTimeOffset.UtcNow;
-    var settings = new AppSettings { LlmPlanningTimeoutSeconds = 120 };
+    var settings = new AppSettings();
     using var planner = new LlamaServerPlanner(settings);
     var state = new GameState
     {

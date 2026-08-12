@@ -69,14 +69,15 @@ public partial class OverlayWindow : Window
 
         var advice = update.Recommendations.FirstOrDefault();
         _currentRecommendationId = advice?.Id;
-        AdviceTitle.Text = update.Plan?.CurrentGoal ?? advice?.Title ?? (update.IsConnected ? "規劃暫時不可用" : "等待遊戲連線");
-        AdviceDescription.Text = update.Plan is null
-            ? advice?.Description ?? (update.IsConnected ? "沒有需要立即提醒的事項。" : "啟動 AOE2 並進入對局後會自動開始。 ")
-            : $"{update.Plan.Reason}{(update.Plan.ReusedAfterPlanningFailure ? "（沿用上一份有效計畫）" : string.Empty)}";
+        AdviceTitle.Text = advice?.Title ?? update.Plan?.CurrentGoal ?? (update.IsConnected ? "規劃暫時不可用" : "等待遊戲連線");
+        AdviceDescription.Text = advice?.Description ?? update.Plan?.Reason ??
+            (update.IsConnected ? "沒有需要立即提醒的事項。" : "啟動 AOE2 並進入對局後會自動開始。 ");
         DismissButton.Visibility = advice is null ? Visibility.Collapsed : Visibility.Visible;
-        OtherAdviceText.Text = update.Recommendations.Count > 1
-            ? "其他：" + string.Join("、", update.Recommendations.Skip(1).Select(item => item.Title))
-            : string.Empty;
+        OtherAdviceText.Text = update.Plan is not null
+            ? $"策略：{update.Plan.Strategy} · 目標：{update.Plan.CurrentGoal}{(update.Plan.ReusedAfterPlanningFailure ? "（沿用上一份有效計畫）" : string.Empty)}"
+            : update.Recommendations.Count > 1
+                ? "其他：" + string.Join("、", update.Recommendations.Skip(1).Select(item => item.Title))
+                : string.Empty;
     }).Task;
 
     private void UpdateResources(GameState? state)

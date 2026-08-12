@@ -18,6 +18,7 @@ using AgePilot.Infrastructure.GameData;
 using AgePilot.Core.Automation;
 using AgePilot.Vision.World;
 using AgePilot.Core.Planning;
+using AgePilot.Infrastructure.Planning;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -60,6 +61,9 @@ var tests = new (string Name, Action Run)[]
     ("Game plan validator rejects unsafe conditions", GamePlanValidatorRejectsUnsafeConditions),
     ("Strategy engine reuses then expires previous plan", StrategyEngineReusesThenExpiresPlan),
     ("Minimap requires temporal confirmation", MinimapRequiresTemporalConfirmation),
+    ("GPU device parser rejects CPU fallback", GpuDeviceParserRejectsCpuFallback),
+    ("Quantified plan becomes concrete recommendation", QuantifiedPlanBecomesConcreteRecommendation),
+    ("LLM quantities are corrected by observed game state", LlmQuantitiesAreCorrectedByGameState),
     ("AOE2 installation hotkeys are parsed read only", Aoe2InstallationHotkeysAreParsed),
 };
 
@@ -679,7 +683,7 @@ static void GamePlanValidatorRejectsUnsafeConditions()
     Equal(true, GamePlanValidator.Validate(valid, now).Success);
     var unsafePlan = valid with
     {
-        Actions = [new PlannedAction(PlannedActionKind.QueueVillager, 80, "test", [new PlanCondition("mouseX", "eq", "42")])],
+        Actions = [new PlannedAction(PlannedActionKind.QueueVillager, 80, "test", Preconditions: [new PlanCondition("mouseX", "eq", "42")])],
     };
     Equal(false, GamePlanValidator.Validate(unsafePlan, now).Success);
 }
@@ -712,6 +716,45 @@ static void MinimapRequiresTemporalConfirmation()
     var confirmed = analyzer.Analyze(pixels, width, height, roi, DateTimeOffset.UtcNow);
     Equal(ObservationStatus.Confirmed, confirmed.Status);
     Equal(MapArchetype.Island, confirmed.Archetype);
+}
+
+static void GpuDeviceParserRejectsCpuFallback()
+{
+    Equal<string?>(null, LlamaServerPlanner.ParseGpuDevice("Available devices:\n", "hip"));
+    Equal("ROCm0", LlamaServerPlanner.ParseGpuDevice("Available devices:\n  ROCm0: AMD Radeon RX 9070 XT", "hip"));
+    Equal("Vulkan0", LlamaServerPlanner.ParseGpuDevice("Vulkan0: AMD Radeon RX 9070 XT", "vulkan"));
+}
+
+static void QuantifiedPlanBecomesConcreteRecommendation()
+{
+    var now = DateTimeOffset.UtcNow;
+    var plan = new GamePlan("p", now, now.AddSeconds(60), "經濟", "避免卡人口", "人口空間不足", 0.9, [], [],
+        [new PlannedAction(PlannedActionKind.BuildHouse, 90, "先補住房", Quantity: 2, TargetPopulationCap: 30,
+            TargetFoodWorkers: 12, TargetWoodWorkers: 8, TargetGoldWorkers: 3, TargetStoneWorkers: 0,
+            RecheckSeconds: 20, SuccessCondition: "人口上限達到 30")]);
+    var recommendation = GamePlanRecommendationAdapter.Convert(plan).Single();
+    Equal("建造 2 間房屋", recommendation.Title);
+    Equal(true, recommendation.Description.Contains("木材 8 人", StringComparison.Ordinal));
+    Equal(true, recommendation.Description.Contains("目標配置（非目前實測）", StringComparison.Ordinal));
+    Equal(true, recommendation.Description.Contains("人口上限達到 30", StringComparison.Ordinal));
+}
+
+static void LlmQuantitiesAreCorrectedByGameState()
+{
+    var now = DateTimeOffset.UtcNow;
+    var state = new GameState { Population = Confirmed(18, now), PopulationCap = Confirmed(20, now) };
+    var raw = new PlannedAction(PlannedActionKind.BuildHouse, 1, "住房", Quantity: 1, TargetPopulationCap: 20,
+        TargetFoodWorkers: 5, TargetWoodWorkers: 5, RecheckSeconds: 30);
+    var corrected = LlamaServerPlanner.NormalizeQuantities(raw, state);
+    Equal(25, corrected.TargetPopulationCap);
+    Equal(17, corrected.TargetFoodWorkers + corrected.TargetWoodWorkers + corrected.TargetGoldWorkers + corrected.TargetStoneWorkers);
+    Equal(true, corrected.SuccessCondition.Contains("25", StringComparison.Ordinal));
+
+    var withoutAllocation = raw with { TargetFoodWorkers = 0, TargetWoodWorkers = 0 };
+    var allocated = LlamaServerPlanner.NormalizeQuantities(withoutAllocation, state,
+        new MapContext(MapArchetype.Island, 0.6, 0.1, 0.2, 0.5, 2, 0.3, 0.9, ObservationStatus.Confirmed, now, 3));
+    Equal(17, allocated.TargetFoodWorkers + allocated.TargetWoodWorkers + allocated.TargetGoldWorkers + allocated.TargetStoneWorkers);
+    Equal(true, allocated.TargetWoodWorkers > allocated.TargetGoldWorkers);
 }
 
 static void Equal<T>(T expected, T actual)
