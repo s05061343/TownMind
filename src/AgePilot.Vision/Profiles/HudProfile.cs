@@ -22,6 +22,8 @@ public sealed class HudProfile
 
     public NormalizedRect? PauseMenuRegion { get; init; }
 
+    public NormalizedRect? MinimapRegion { get; init; }
+
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(Id))
@@ -51,5 +53,6 @@ public sealed class HudProfile
 
         AgeRegion?.Validate();
         PauseMenuRegion?.Validate();
+        MinimapRegion?.Validate();
     }
 }

@@ -1,5 +1,14 @@
 # Phase 0 執行指南
 
+## LLM 規劃預覽
+
+Portable 套件不包含約 5 GB 的 GGUF 模型或 llama.cpp runtime。第一次使用請在 Dashboard 的「LLM 規劃預覽」區選擇：
+
+- Runtime 目錄：包含 `hip/llama-server.exe` 與 `vulkan/llama-server.exe` 的 `llama.cpp` 目錄。
+- GGUF 模型：`Qwen3-8B-Q4_K_M.gguf`。
+
+按「測試 LLM」後，狀態顯示「已就緒」才代表 backend 與模型成功載入。Overlay 會繼續顯示規劃中、已就緒或具體錯誤；目前版本只提供規劃預覽，不發送遊戲輸入。
+
 ## 第一次執行
 
 在 repository root 開啟 PowerShell：

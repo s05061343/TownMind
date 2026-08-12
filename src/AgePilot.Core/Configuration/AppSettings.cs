@@ -25,6 +25,14 @@ public sealed class AppSettings
     public string FeudalUpgradeSequence { get; set; } = "H,Z";
     public string CastleUpgradeSequence { get; set; } = "H,X";
     public int StrategicActionIntervalMilliseconds { get; set; } = 12000;
+    public bool EnableLocalPlanning { get; set; } = true;
+    public string LlmModelPath { get; set; } = "models/Qwen3-8B-Q4_K_M.gguf";
+    public string LlamaRuntimePath { get; set; } = ".runtime/llama.cpp";
+    public string LlmBackend { get; set; } = "auto";
+    public int LlmPort { get; set; } = 18080;
+    public int LlmContextSize { get; set; } = 8192;
+    public int LlmGpuLayers { get; set; } = 99;
+    public int LlmPlanningTimeoutSeconds { get; set; } = 30;
 
     public void Validate()
     {
@@ -51,5 +59,12 @@ public sealed class AppSettings
             throw new InvalidDataException("軍事操作間隔必須介於 1000 到 60000 毫秒。");
         if (StrategicActionIntervalMilliseconds is < 1000 or > 60000)
             throw new InvalidDataException("策略操作間隔必須介於 1000 到 60000 毫秒。");
+        if (EnableLocalPlanning && (string.IsNullOrWhiteSpace(LlmModelPath) || string.IsNullOrWhiteSpace(LlamaRuntimePath)))
+            throw new InvalidDataException("本機規劃需要模型與 llama.cpp runtime 路徑。");
+        if (LlmBackend is not ("auto" or "hip" or "vulkan"))
+            throw new InvalidDataException("LLM backend 必須是 auto、hip 或 vulkan。");
+        if (LlmPort is < 1024 or > 65535) throw new InvalidDataException("LLM port 必須介於 1024 到 65535。");
+        if (LlmContextSize is < 2048 or > 32768) throw new InvalidDataException("LLM context size 超出支援範圍。");
+        if (LlmPlanningTimeoutSeconds is < 5 or > 120) throw new InvalidDataException("LLM 規劃逾時必須介於 5 到 120 秒。");
     }
 }

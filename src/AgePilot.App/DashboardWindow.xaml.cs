@@ -9,6 +9,8 @@ using Microsoft.Win32;
 using System.IO;
 using System.Text.Json;
 using AgePilot.Infrastructure.Diagnostics;
+using AgePilot.Infrastructure.Planning;
+using AgePilot.Core.Planning;
 using System.ComponentModel;
 using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
@@ -89,6 +91,9 @@ public partial class DashboardWindow : Window
         BlacksmithSequenceText.Text = _settings.BlacksmithBuildSequence;
         FeudalUpgradeSequenceText.Text = _settings.FeudalUpgradeSequence;
         CastleUpgradeSequenceText.Text = _settings.CastleUpgradeSequence;
+        LlamaRuntimePathText.Text = _settings.LlamaRuntimePath;
+        LlmModelPathText.Text = _settings.LlmModelPath;
+        SetLlmStatus(PlannerRuntimeStatus.NotConfigured("尚未測試；啟動 Overlay 後會自動載入"));
         ScanIntervalCombo.SelectedItem = ScanIntervalCombo.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(item => item.Content?.ToString() == _settings.ScanIntervalMilliseconds.ToString());
         if (ScanIntervalCombo.SelectedIndex < 0) ScanIntervalCombo.SelectedIndex = 1;
@@ -105,6 +110,55 @@ public partial class DashboardWindow : Window
     {
         try { _settings = ReadSettings(); _store.Save(_settings); MessageText.Text = $"設定已儲存至 {_store.Path}"; }
         catch (Exception exception) { MessageText.Text = $"無法儲存設定：{exception.Message}"; }
+    }
+
+    private void OnBrowseLlamaRuntime(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "選擇包含 hip 與 vulkan 子目錄的 llama.cpp runtime 目錄",
+            UseDescriptionForTitle = true,
+            SelectedPath = Directory.Exists(LlamaRuntimePathText.Text) ? LlamaRuntimePathText.Text : string.Empty,
+        };
+        if (dialog.ShowDialog() == Forms.DialogResult.OK) LlamaRuntimePathText.Text = dialog.SelectedPath;
+    }
+
+    private void OnBrowseLlmModel(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "選擇 GGUF 模型",
+            Filter = "GGUF 模型 (*.gguf)|*.gguf|所有檔案 (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) == true) LlmModelPathText.Text = dialog.FileName;
+    }
+
+    private async void OnTestLlm(object sender, RoutedEventArgs e)
+    {
+        TestLlmButton.IsEnabled = false;
+        try
+        {
+            var candidate = ReadSettings();
+            SetLlmStatus(new(PlannerRuntimePhase.Starting, "正在啟動 llama-server 並載入模型…"));
+            using var planner = new LlamaServerPlanner(candidate,
+                candidate.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(190));
+            SetLlmStatus(await planner.CheckReadyAsync(timeout.Token));
+        }
+        catch (OperationCanceledException) { SetLlmStatus(new(PlannerRuntimePhase.Error, "LLM 測試逾時")); }
+        catch (Exception exception) { SetLlmStatus(new(PlannerRuntimePhase.Error, exception.Message)); }
+        finally { TestLlmButton.IsEnabled = true; }
+    }
+
+    private void SetLlmStatus(PlannerRuntimeStatus status)
+    {
+        LlmStatusText.Text = $"LLM：{status.Message}";
+        LlmStatusDot.Fill = new SolidColorBrush(status.Phase == PlannerRuntimePhase.Ready
+            ? System.Windows.Media.Color.FromRgb(127, 166, 106)
+            : status.Phase == PlannerRuntimePhase.Error
+                ? System.Windows.Media.Color.FromRgb(190, 82, 72)
+                : System.Windows.Media.Color.FromRgb(211, 162, 76));
     }
 
     private void OnToggleOverlay(object sender, RoutedEventArgs e)
@@ -200,6 +254,14 @@ public partial class DashboardWindow : Window
             EconomyActionIntervalMilliseconds = _settings.EconomyActionIntervalMilliseconds,
             MilitaryActionIntervalMilliseconds = _settings.MilitaryActionIntervalMilliseconds,
             StrategicActionIntervalMilliseconds = _settings.StrategicActionIntervalMilliseconds,
+            EnableLocalPlanning = _settings.EnableLocalPlanning,
+            LlamaRuntimePath = LlamaRuntimePathText.Text.Trim(),
+            LlmModelPath = LlmModelPathText.Text.Trim(),
+            LlmBackend = _settings.LlmBackend,
+            LlmPort = _settings.LlmPort,
+            LlmContextSize = _settings.LlmContextSize,
+            LlmGpuLayers = _settings.LlmGpuLayers,
+            LlmPlanningTimeoutSeconds = _settings.LlmPlanningTimeoutSeconds,
         };
         settings.Validate();
         return settings;
@@ -281,6 +343,7 @@ public partial class DashboardWindow : Window
 
     private void OnCoachUpdated(object? sender, LiveCoachUpdate update)
     {
+        if (update.LlmStatus is not null) SetLlmStatus(update.LlmStatus);
         var rules = update.Recommendations.Count == 0
             ? "無 active rule"
             : string.Join(", ", update.Recommendations.Select(item => $"{item.Id}:{item.Title}"));

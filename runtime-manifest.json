@@ -1,0 +1,11 @@
+{
+  "llamaCpp": {
+    "tag": "b9637",
+    "defaultBackend": "hip",
+    "fallbackBackend": "vulkan"
+  },
+  "model": {
+    "repository": "Qwen/Qwen3-8B-GGUF",
+    "file": "Qwen3-8B-Q4_K_M.gguf"
+  }
+}

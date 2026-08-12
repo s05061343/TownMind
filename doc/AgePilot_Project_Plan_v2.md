@@ -550,10 +550,14 @@ AOE2 Window
 → Observation Validation
 → GameState Estimator
 → History
-→ Rule Engine
+→ SituationContext（HUD + 小地圖 + 趨勢）
+→ Local LLM Strategy Engine
+→ Validated GamePlan
 → Recommendation Coordinator
 → Overlay
 ```
+
+自 2026-08-12 起，`GamePlan` 是提示與未來自動執行的唯一高階決策來源。第一個垂直切片僅提供規劃預覽，所有鍵鼠輸入停用；安全 Gate 與結果確認仍由確定性程式負責。
 
 ### 14.2 Solution 結構
 

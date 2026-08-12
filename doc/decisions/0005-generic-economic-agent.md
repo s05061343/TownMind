@@ -13,6 +13,8 @@ Accepted — 2026-08-09。
 
 ## 閉環
 
+> 2026-08-12：本節的 `Generic Economic Planner` live path 已由 ADR 0008 的統一 `GamePlan` 取代。第一個 LLM 垂直切片只顯示 HUD，不發送輸入；下列內容保留為未來 executor 的安全與確認基準。
+
 ```text
 GDI 畫面 → HUD OCR + World Analyzer → Generic Economic Planner
         → Non-invasive Control Backend → Pending confirmation

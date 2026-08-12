@@ -17,6 +17,7 @@ using AgePilot.Infrastructure.Diagnostics;
 using AgePilot.Infrastructure.GameData;
 using AgePilot.Core.Automation;
 using AgePilot.Vision.World;
+using AgePilot.Core.Planning;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -56,6 +57,9 @@ var tests = new (string Name, Action Run)[]
     ("Generic world analyzer finds actionable candidates", GenericWorldAnalyzerFindsCandidates),
     ("Visual candidates cannot drive player input", VisualCandidatesCannotDriveInput),
     ("Action execution fails closed and confirms explicitly", ActionExecutionFailsClosedAndConfirms),
+    ("Game plan validator rejects unsafe conditions", GamePlanValidatorRejectsUnsafeConditions),
+    ("Strategy engine reuses then expires previous plan", StrategyEngineReusesThenExpiresPlan),
+    ("Minimap requires temporal confirmation", MinimapRequiresTemporalConfirmation),
     ("AOE2 installation hotkeys are parsed read only", Aoe2InstallationHotkeysAreParsed),
 };
 
@@ -397,6 +401,8 @@ static void SettingsRoundTrip()
             VillagerProductionSequence = "Ctrl+H,Q",
             EnableMilitaryAutomation = true,
             BarracksProductionSequence = "B,Q",
+            LlamaRuntimePath = @"D:\runtime\llama.cpp",
+            LlmModelPath = @"D:\models\qwen.gguf",
         });
         var loaded = store.Load();
         Equal("profile.json", loaded.HudProfilePath);
@@ -409,6 +415,8 @@ static void SettingsRoundTrip()
         Equal("Ctrl+H,Q", loaded.VillagerProductionSequence);
         Equal(true, loaded.EnableMilitaryAutomation);
         Equal("B,Q", loaded.BarracksProductionSequence);
+        Equal(@"D:\runtime\llama.cpp", loaded.LlamaRuntimePath);
+        Equal(@"D:\models\qwen.gguf", loaded.LlmModelPath);
     }
     finally { if (File.Exists(path)) File.Delete(path); }
 }
@@ -663,6 +671,49 @@ static void Aoe2InstallationHotkeysAreParsed()
     }
 }
 
+static void GamePlanValidatorRejectsUnsafeConditions()
+{
+    var now = DateTimeOffset.UtcNow;
+    var valid = new GamePlan("p1", now, now.AddSeconds(60), "economy", "補人口", "人口仍有空間", 0.8,
+        [], [], [new PlannedAction(PlannedActionKind.QueueVillager, 80, "維持生產")]);
+    Equal(true, GamePlanValidator.Validate(valid, now).Success);
+    var unsafePlan = valid with
+    {
+        Actions = [new PlannedAction(PlannedActionKind.QueueVillager, 80, "test", [new PlanCondition("mouseX", "eq", "42")])],
+    };
+    Equal(false, GamePlanValidator.Validate(unsafePlan, now).Success);
+}
+
+static void StrategyEngineReusesThenExpiresPlan()
+{
+    var now = DateTimeOffset.UtcNow;
+    var first = new GamePlan("p1", now, now.AddSeconds(60), "economy", "補人口", "維持生產", 0.9,
+        [], [], [new PlannedAction(PlannedActionKind.QueueVillager, 80, "維持生產")]);
+    using var engine = new StrategyEngine(new SequencePlanner([new(first), new(null, "timeout")]));
+    var state = new GameState { Food = Confirmed(100, now), Population = Confirmed(4, now), PopulationCap = Confirmed(5, now) };
+    var history = new GameHistory(); history.Add(state, now);
+    _ = engine.UpdateAsync(state, history, null, now, CancellationToken.None).GetAwaiter().GetResult();
+    Equal("p1", engine.UpdateAsync(state, history, null, now, CancellationToken.None).GetAwaiter().GetResult().Plan?.PlanId);
+    var changed = new GameState { Age = GameAge.Feudal, Food = Confirmed(100, now), Population = Confirmed(4, now), PopulationCap = Confirmed(5, now) };
+    _ = engine.UpdateAsync(changed, history, null, now.AddSeconds(1), CancellationToken.None).GetAwaiter().GetResult();
+    Equal(true, engine.UpdateAsync(changed, history, null, now.AddSeconds(1), CancellationToken.None).GetAwaiter().GetResult().Plan?.ReusedAfterPlanningFailure == true);
+    Equal<GamePlan?>(null, engine.UpdateAsync(changed, history, null, now.AddSeconds(61), CancellationToken.None).GetAwaiter().GetResult().Plan);
+}
+
+static void MinimapRequiresTemporalConfirmation()
+{
+    const int width = 90, height = 90;
+    var pixels = new byte[width * height * 4];
+    for (var i = 0; i < pixels.Length; i += 4) { pixels[i] = 150; pixels[i + 1] = 50; pixels[i + 2] = 30; pixels[i + 3] = 255; }
+    var analyzer = new MinimapAnalyzer();
+    var roi = new NormalizedRect(0, 0, 1, 1);
+    Equal(ObservationStatus.Raw, analyzer.Analyze(pixels, width, height, roi, DateTimeOffset.UtcNow).Status);
+    _ = analyzer.Analyze(pixels, width, height, roi, DateTimeOffset.UtcNow);
+    var confirmed = analyzer.Analyze(pixels, width, height, roi, DateTimeOffset.UtcNow);
+    Equal(ObservationStatus.Confirmed, confirmed.Status);
+    Equal(MapArchetype.Island, confirmed.Archetype);
+}
+
 static void Equal<T>(T expected, T actual)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -692,4 +743,11 @@ static void Throws<TException>(Action action)
     }
 
     throw new InvalidOperationException($"Expected exception {typeof(TException).Name}.");
+}
+
+sealed class SequencePlanner(IEnumerable<PlanningResult> results) : IStrategicPlanner
+{
+    private readonly Queue<PlanningResult> _results = new(results);
+    public Task<PlanningResult> PlanAsync(SituationContext context, CancellationToken cancellationToken) =>
+        Task.FromResult(_results.Count == 0 ? new PlanningResult(null, "empty") : _results.Dequeue());
 }

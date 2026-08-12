@@ -19,6 +19,7 @@
 | [decisions/0005-generic-economic-agent.md](decisions/0005-generic-economic-agent.md) | 通用世界辨識、21 人經濟規劃、目標驗證與確認閉環 | 修改資源辨識、建築、升級或經濟狀態機時 |
 | [decisions/0006-static-game-data.md](decisions/0006-static-game-data.md) | 唯讀解析 AOE2 DE 靜態資料、版本快取與即時狀態邊界 | 修改遊戲資料匯入、單位／科技映射或快取時 |
 | [decisions/0007-local-llm-escalation.md](decisions/0007-local-llm-escalation.md) | Local LLM 的低頻異常升級、輸出白名單與效能邊界 | 規劃或實作 Local LLM 判斷時 |
+| [decisions/0008-unified-local-llm-planner.md](decisions/0008-unified-local-llm-planner.md) | 統一 GamePlan、Qwen3 本機 runtime、小地圖上下文與安全邊界 | 修改提示、規劃或未來自動執行時 |
 | [guides/running-phase0.md](guides/running-phase0.md) | 建置、參考圖 OCR、即時單幀掃描與已知限制 | 執行或驗證目前程式時 |
 | [brand/branding.md](brand/branding.md) | 老鷹徽章、色彩、使用規則與資產重建方式 | 修改 UI、封裝、網站或發佈素材時 |
 

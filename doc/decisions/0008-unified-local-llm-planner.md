@@ -1,0 +1,22 @@
+# ADR 0008：統一本機 LLM 戰局規劃器
+
+## 狀態
+
+Accepted — 2026-08-12。取代 ADR 0007 將 LLM 限定為異常升級層的定位。
+
+## 決策
+
+AgePilot 以同一份 `GamePlan` 作為戰場提示與未來自動執行的唯一高階決策來源。輸入是經驗證的 HUD `GameState`、短期趨勢、小地圖 `MapContext`、前一份計畫與近期事件；Qwen3-8B 只輸出白名單高階意圖、理由、前置條件與完成條件。
+
+LLM 不得輸出鍵盤序列、滑鼠座標或逐步控制事件。計畫必須通過確定性 schema、期限、信心與條件白名單驗證。安全 Gate、前景視窗、緊急停止、動作確認及逾時恢復不依賴 LLM。
+
+第一個垂直切片只顯示規劃 HUD，停用所有遊戲輸入。自動執行恢復時只能消費同一份已驗證 `GamePlan`，不得另建策略判斷來源。
+
+## Runtime 與小地圖邊界
+
+- 模型為 `models/Qwen3-8B-Q4_K_M.gguf`；llama.cpp 位於 `.runtime/llama.cpp`，HIP 優先、Vulkan備援，只監聽 loopback。
+- `.runtime/` 與 GGUF 不進入版本控制或公開套件。
+- Portable 版由 Dashboard 分別選擇 llama.cpp runtime 目錄與 GGUF 模型檔；「測試 LLM」會啟動 backend、等待 health ready，並顯示未設定、啟動中、載入模型、已就緒、規劃中或錯誤狀態。
+- 推論失敗可沿用上一份計畫，但建立 60 秒後強制失效。
+- 小地圖第一版只產生水域、森林、開放地形與粗略拓撲；不辨識資源點、敵我單位或地圖名稱。
+- 低覆蓋、未探索或跨幀不一致時回傳 Unknown／Unavailable。

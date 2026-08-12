@@ -14,10 +14,15 @@ public sealed class LocalJsonLineLogger(string path)
         var line = JsonSerializer.Serialize(new { timestamp = DateTimeOffset.UtcNow, eventName, data });
         lock (_sync)
         {
-            var directory = System.IO.Path.GetDirectoryName(Path);
-            if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-            RotateIfNeeded();
-            File.AppendAllText(Path, line + Environment.NewLine);
+            try
+            {
+                var directory = System.IO.Path.GetDirectoryName(Path);
+                if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+                RotateIfNeeded();
+                File.AppendAllText(Path, line + Environment.NewLine);
+            }
+            catch (UnauthorizedAccessException) { }
+            catch (IOException) { }
         }
     }
 

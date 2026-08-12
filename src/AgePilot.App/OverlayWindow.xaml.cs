@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using AgePilot.Core;
 using AgePilot.Core.Persistence;
 using AgePilot.Infrastructure.Diagnostics;
-using AgePilot.Core.Automation;
 using AgePilot.Core.Configuration;
 using System.Windows.Media;
 
@@ -16,8 +15,6 @@ public partial class OverlayWindow : Window
     public event EventHandler<LiveCoachUpdate>? CoachUpdated;
     private const int HotKeyToggleVisibility = 0xA901;
     private const int HotKeyToggleClickThrough = 0xA902;
-    private const int HotKeyAutomationStart = 0xA903;
-    private const int HotKeyAutomationStop = 0xA904;
     private const int WindowMessageHotKey = 0x0312;
     private const int ExtendedStyleIndex = -20;
     private const int ExtendedStyleTransparent = 0x20;
@@ -28,13 +25,9 @@ public partial class OverlayWindow : Window
 
     private readonly CancellationTokenSource _cancellation = new();
     private readonly LiveCoachService _coach;
-    private readonly AppSettings _settings;
-    private readonly AutomationController _automation;
     private Task? _monitorTask;
     private nint _windowHandle;
     private bool _isClickThrough;
-    private bool _automationStartHotKeyRegistered;
-    private bool _automationStopHotKeyRegistered;
     private string? _currentRecommendationId;
 
     public OverlayWindow(
@@ -44,9 +37,7 @@ public partial class OverlayWindow : Window
         LocalJsonLineLogger? logger = null)
     {
         InitializeComponent();
-        _settings = settings;
-        _automation = new AutomationController(settings, logger);
-        _coach = new LiveCoachService(profilePath, settings.ScanIntervalMilliseconds, sessionRepository, logger);
+        _coach = new LiveCoachService(profilePath, settings, settings.ScanIntervalMilliseconds, sessionRepository, logger);
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         Closed += OnClosed;
@@ -69,19 +60,19 @@ public partial class OverlayWindow : Window
     private Task UpdateUiAsync(LiveCoachUpdate update) => Dispatcher.InvokeAsync(() =>
     {
         CoachUpdated?.Invoke(this, update);
-        _automation.Handle(update, DateTimeOffset.UtcNow);
-        UpdateAutomationUi();
-        WorldStateText.Text = update.World is null
-            ? "世界辨識：等待畫面"
-            : $"世界辨識：{update.World.Targets.Count} 個候選 · {update.World.Confidence:P0}";
+        UpdatePlanningUi(update.LlmStatus);
+        WorldStateText.Text = update.Map?.IsUsable == true
+            ? $"小地圖：{update.Map.Archetype} · {update.Map.Confidence:P0}"
+            : "小地圖：等待可靠地形";
         StatusText.Text = _isClickThrough ? "滑鼠穿透中（Ctrl+Shift+C 解除）" : update.Status;
         UpdateResources(update.State);
 
         var advice = update.Recommendations.FirstOrDefault();
         _currentRecommendationId = advice?.Id;
-        AdviceTitle.Text = advice?.Title ?? (update.IsConnected ? "目前狀態穩定" : "等待遊戲連線");
-        AdviceDescription.Text = advice?.Description ??
-            (update.IsConnected ? "沒有需要立即提醒的事項。" : "啟動 AOE2 並進入對局後會自動開始。 ");
+        AdviceTitle.Text = update.Plan?.CurrentGoal ?? advice?.Title ?? (update.IsConnected ? "規劃暫時不可用" : "等待遊戲連線");
+        AdviceDescription.Text = update.Plan is null
+            ? advice?.Description ?? (update.IsConnected ? "沒有需要立即提醒的事項。" : "啟動 AOE2 並進入對局後會自動開始。 ")
+            : $"{update.Plan.Reason}{(update.Plan.ReusedAfterPlanningFailure ? "（沿用上一份有效計畫）" : string.Empty)}";
         DismissButton.Visibility = advice is null ? Visibility.Collapsed : Visibility.Visible;
         OtherAdviceText.Text = update.Recommendations.Count > 1
             ? "其他：" + string.Join("、", update.Recommendations.Skip(1).Select(item => item.Title))
@@ -130,21 +121,7 @@ public partial class OverlayWindow : Window
         source?.AddHook(WindowMessageHook);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleVisibility, ModifierControl | ModifierShift, VirtualKeyA);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleClickThrough, ModifierControl | ModifierShift, VirtualKeyC);
-        var start = ParseGlobalHotKey(_settings.AutomationStartHotKey);
-        var stop = ParseGlobalHotKey(_settings.AutomationStopHotKey);
-        _automationStopHotKeyRegistered = RegisterHotKey(
-            _windowHandle, HotKeyAutomationStop, stop.Modifiers, stop.VirtualKey);
-        _automationStartHotKeyRegistered = RegisterHotKey(
-            _windowHandle, HotKeyAutomationStart, start.Modifiers, start.VirtualKey);
-        if (!_automationStopHotKeyRegistered)
-        {
-            _automation.Disable("緊急停止熱鍵註冊失敗；自動操作已鎖定");
-            AutomationToggleButton.IsEnabled = false;
-        }
-        else if (!_automationStartHotKeyRegistered)
-        {
-            _automation.Disable("開啟熱鍵註冊失敗；可使用 Overlay 按鈕，停止熱鍵仍有效");
-        }
+        AutomationToggleButton.IsEnabled = false;
         UpdateAutomationUi();
     }
 
@@ -165,16 +142,6 @@ public partial class OverlayWindow : Window
                 ToggleClickThrough();
                 handled = true;
                 break;
-            case HotKeyAutomationStart:
-                _automation.Enable();
-                UpdateAutomationUi();
-                handled = true;
-                break;
-            case HotKeyAutomationStop:
-                _automation.Disable("已由緊急停止熱鍵關閉");
-                UpdateAutomationUi();
-                handled = true;
-                break;
         }
 
         return nint.Zero;
@@ -184,30 +151,33 @@ public partial class OverlayWindow : Window
 
     private void OnToggleAutomation(object sender, RoutedEventArgs e)
     {
-        if (_automation.IsEnabled)
-        {
-            var result = System.Windows.MessageBox.Show(this, "是否關閉自動操作？", "AgePilot", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result != MessageBoxResult.Yes) return;
-            _automation.Disable();
-        }
-        else
-        {
-            _automation.Enable();
-        }
         UpdateAutomationUi();
     }
 
     private void UpdateAutomationUi()
     {
-        AutomationStateText.Text = _automation.IsEnabled ? "自動：開啟" : "自動：關閉";
-        AutomationStateText.Foreground = new SolidColorBrush(_automation.IsEnabled
+        AutomationStateText.Text = "LLM 規劃預覽";
+        AutomationStateText.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(211, 162, 76));
+        AutomationToggleButton.Content = "僅預覽";
+        AutomationDetailText.Text = "同一份計畫將供 HUD 與未來執行器使用；目前不送出輸入";
+        MilitaryStateText.Text = "軍事規劃：首版未啟用";
+    }
+
+    private void UpdatePlanningUi(AgePilot.Core.Planning.PlannerRuntimeStatus? status)
+    {
+        UpdateAutomationUi();
+        if (status is null) return;
+        AutomationStateText.Text = status.Phase == AgePilot.Core.Planning.PlannerRuntimePhase.Ready
+            ? "LLM 已就緒"
+            : status.Phase == AgePilot.Core.Planning.PlannerRuntimePhase.Planning
+                ? "LLM 規劃中"
+                : "LLM 規劃預覽";
+        AutomationStateText.Foreground = new SolidColorBrush(status.Phase == AgePilot.Core.Planning.PlannerRuntimePhase.Ready
             ? System.Windows.Media.Color.FromRgb(127, 166, 106)
-            : System.Windows.Media.Color.FromRgb(211, 162, 76));
-        AutomationToggleButton.Content = _automation.IsEnabled ? "關閉自動" : "開啟自動";
-        AutomationDetailText.Text = $"{_automation.LastStatus} · {_settings.AutomationStartHotKey} 開啟 / {_settings.AutomationStopHotKey} 停止";
-        MilitaryStateText.Text = _settings.EnableMilitaryAutomation
-            ? "軍事：開啟（僅執行已設定序列）"
-            : "軍事：關閉";
+            : status.Phase == AgePilot.Core.Planning.PlannerRuntimePhase.Error
+                ? System.Windows.Media.Color.FromRgb(190, 82, 72)
+                : System.Windows.Media.Color.FromRgb(211, 162, 76));
+        AutomationDetailText.Text = status.Message;
     }
 
     private void ToggleClickThrough()
@@ -229,13 +199,10 @@ public partial class OverlayWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
-        _automation.Disable("Overlay 已關閉");
         if (_windowHandle != nint.Zero)
         {
             _ = UnregisterHotKey(_windowHandle, HotKeyToggleVisibility);
             _ = UnregisterHotKey(_windowHandle, HotKeyToggleClickThrough);
-            _ = UnregisterHotKey(_windowHandle, HotKeyAutomationStart);
-            _ = UnregisterHotKey(_windowHandle, HotKeyAutomationStop);
         }
 
         _cancellation.Cancel();
@@ -248,44 +215,6 @@ public partial class OverlayWindow : Window
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
-    }
-
-    private static (uint Modifiers, uint VirtualKey) ParseGlobalHotKey(string gesture)
-    {
-        var chord = InputSequence.ParseHotKey(gesture);
-        uint modifiers = 0;
-        foreach (var modifier in chord.Keys.Take(chord.Keys.Count - 1))
-        {
-            modifiers |= modifier.ToUpperInvariant() switch
-            {
-                "CTRL" => ModifierControl,
-                "SHIFT" => ModifierShift,
-                "ALT" => 0x0001,
-                _ => throw new InvalidOperationException($"不支援的熱鍵修飾鍵：{modifier}"),
-            };
-        }
-        var key = chord.Keys[^1];
-        uint virtualKey = key.StartsWith("F", StringComparison.OrdinalIgnoreCase)
-            ? (uint)(0x70 + int.Parse(key[1..]) - 1)
-            : key.Length == 1
-                ? (uint)char.ToUpperInvariant(key[0])
-                : key.ToUpperInvariant() switch
-                {
-                    "ENTER" => 0x0D,
-                    "ESCAPE" => 0x1B,
-                    "SPACE" => 0x20,
-                    "TAB" => 0x09,
-                    "LEFT" => 0x25,
-                    "UP" => 0x26,
-                    "RIGHT" => 0x27,
-                    "DOWN" => 0x28,
-                    "HOME" => 0x24,
-                    "END" => 0x23,
-                    "PAGEUP" => 0x21,
-                    "PAGEDOWN" => 0x22,
-                    _ => throw new InvalidOperationException($"不支援的全域熱鍵：{key}"),
-                };
-        return (modifiers, virtualKey);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

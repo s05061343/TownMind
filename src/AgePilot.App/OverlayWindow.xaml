@@ -43,12 +43,12 @@
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel>
-                        <TextBlock x:Name="AutomationStateText" Text="自動：關閉" Foreground="#D3A24C" FontWeight="SemiBold"/>
-                        <TextBlock x:Name="AutomationDetailText" Text="Ctrl+F10 開啟 · Ctrl+F12 緊急關閉" Foreground="#9FA695" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="AutomationStateText" Text="LLM 規劃預覽" Foreground="#D3A24C" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="AutomationDetailText" Text="目前不會送出遊戲輸入" Foreground="#9FA695" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap"/>
                         <TextBlock x:Name="MilitaryStateText" Text="軍事：關閉" Foreground="#9FA695" FontSize="11" Margin="0,2,0,0"/>
                         <TextBlock x:Name="WorldStateText" Text="世界辨識：等待畫面" Foreground="#9FA695" FontSize="11" Margin="0,2,0,0"/>
                     </StackPanel>
-                    <Button x:Name="AutomationToggleButton" Grid.Column="1" Content="開啟自動" Click="OnToggleAutomation"
+                    <Button x:Name="AutomationToggleButton" Grid.Column="1" Content="僅預覽" Click="OnToggleAutomation" IsEnabled="False"
                             Padding="12,6" Margin="8,0,0,0" Background="#C6A15B" Foreground="#151713" BorderThickness="0" FontWeight="SemiBold"/>
                 </Grid>
             </Border>

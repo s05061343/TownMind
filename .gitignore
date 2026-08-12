@@ -7,3 +7,5 @@ TestResults/
 logs/
 artifacts/
 .nuget/
+.runtime/
+models/*.gguf

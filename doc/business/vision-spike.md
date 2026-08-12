@@ -22,6 +22,7 @@
 - [x] `GameNotFound / Detected / Loading / Active / Paused / Unavailable / Ended` 狀態與暫停 fail-closed。
 - [x] 變更 ROI 快取、零拷貝 Frame bridge 與可重跑 Vision／Replay JSON 報告。
 - [ ] 多樣本 Vision Gate 準確率驗收。
+- [ ] 小地圖地形／拓撲 MapContext 多樣本 Gate；未通過前不得驅動自動操作。
 
 目前狀態是 **Public Alpha 軟體功能已完成，Vision／實機 Gate 仍在累積證據**。GDI 已在目前校正環境取得正確畫面；其他顯示模式仍需個別驗證。
 
@@ -65,6 +66,8 @@ Phase 0 只回答一個問題：AgePilot 能否從 AOE2 DE 畫面可靠取得 Ti
 - Population
 
 時代與遊戲時間等取得可靠樣本後再加入。
+
+小地圖屬於 Tier C 策略上下文。現行校正 Profile 已加入標準化 Minimap ROI，第一版只分析水域、森林、開放地形與粗略拓撲，且必須跨三幀確認；未知與戰爭迷霧不得解讀為沒有資源。
 
 ## 5. 資料契約
 

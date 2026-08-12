@@ -31,10 +31,31 @@
             <CheckBox x:Name="SessionRecordingCheck" Content="儲存本機對局紀錄（SQLite）" Margin="0,14,0,0" Foreground="#EEE9DD"/>
             <CheckBox x:Name="LocalDiagnosticsCheck" Content="儲存本機診斷事件（JSONL）" Margin="0,8,0,0" Foreground="#EEE9DD"/>
             <Separator Margin="0,20,0,14" Background="#42483D"/>
-            <TextBlock Text="自動操作" Foreground="#C6A15B" FontSize="16" FontWeight="SemiBold"/>
-            <TextBlock Text="只在 AOE2 位於前景且 HUD 狀態可靠時送出按鍵。房屋位置仍由你手動決定。序列以逗號分隔，組合鍵用 +。"
-                       Foreground="#9FA695" TextWrapping="Wrap" Margin="0,6,0,12"/>
-            <Grid>
+            <TextBlock Text="LLM 規劃預覽" Foreground="#C6A15B" FontSize="16" FontWeight="SemiBold"/>
+            <TextBlock Text="目前只顯示同一份 LLM 戰局計畫，不會送出任何遊戲輸入。"
+                       Foreground="#9FA695" TextWrapping="Wrap" Margin="0,6,0,10"/>
+            <Border Background="#20241D" CornerRadius="6" Padding="10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Ellipse x:Name="LlmStatusDot" Width="10" Height="10" Fill="#D3A24C" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="LlmStatusText" Grid.Column="1" Text="LLM：尚未測試" Foreground="#C9C5BA" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Button x:Name="TestLlmButton" Grid.Column="2" Content="測試 LLM" Click="OnTestLlm" Padding="12,5" Margin="10,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+                </Grid>
+            </Border>
+            <TextBlock Text="llama.cpp Runtime 目錄" Foreground="#9FA695"/>
+            <Grid Margin="0,5,0,9">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="LlamaRuntimePathText" Padding="7" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                <Button Grid.Column="1" Content="選擇目錄" Click="OnBrowseLlamaRuntime" Padding="12,6" Margin="8,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+            </Grid>
+            <TextBlock Text="GGUF 模型檔" Foreground="#9FA695"/>
+            <Grid Margin="0,5,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="LlmModelPathText" Padding="7" Background="#20241D" Foreground="#EEE9DD" BorderBrush="#42483D"/>
+                <Button Grid.Column="1" Content="選擇模型" Click="OnBrowseLlmModel" Padding="12,6" Margin="8,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+            </Grid>
+            <TextBlock Text="以下舊自動操作設定暫時停用。" Foreground="#9FA695" Margin="0,0,0,8"/>
+            <Grid IsEnabled="False" Opacity="0.55">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <TextBlock Text="開啟熱鍵" VerticalAlignment="Center" Foreground="#C9C5BA"/>

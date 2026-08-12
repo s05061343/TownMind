@@ -10,11 +10,15 @@ using AgePilot.Vision.Profiles;
 using AgePilot.Infrastructure.Diagnostics;
 using AgePilot.Core.Automation;
 using AgePilot.Vision.World;
+using AgePilot.Core.Configuration;
+using AgePilot.Core.Planning;
+using AgePilot.Infrastructure.Planning;
 
 namespace AgePilot.App;
 
 public sealed class LiveCoachService(
     string profilePath,
+    AppSettings settings,
     int scanIntervalMilliseconds = 500,
     ISessionRepository? sessionRepository = null,
     LocalJsonLineLogger? logger = null) : IDisposable
@@ -24,19 +28,11 @@ public sealed class LiveCoachService(
     private readonly PaddleNumericOcrEngine _ocr = new();
     private readonly TemporalGameStateEstimator _estimator = new();
     private readonly GameHistory _history = new();
-    private readonly CoachEngine _coach = new(new ICoachRule[]
-    {
-        new PopulationCriticalRule(),
-        new PopulationLowRule(),
-        new WoodOverflowRule(),
-        new GoldLowForCastleRule(),
-        new CastleReadyRule(),
-        new ImperialReadyRule(),
-        new ResourceOverflowRule(),
-    });
+    private readonly StrategyEngine _strategy = new(new LlamaServerPlanner(settings, logger));
     private readonly RecommendationCoordinator _recommendationCoordinator = new();
     private readonly GameLifecycleTracker _lifecycle = new();
     private readonly GenericWorldAnalyzer _worldAnalyzer = new();
+    private readonly MinimapAnalyzer _minimapAnalyzer = new();
     private readonly HudProfile _profile = HudProfileLoader.Load(profilePath);
     private readonly ISessionRepository? _sessions = sessionRepository;
     private readonly HashSet<string> _activeRecommendationIds = [];
@@ -92,12 +88,16 @@ public sealed class LiveCoachService(
                         }
                         var state = _estimator.Update(raw, frame.CapturedAt);
                         var world = _worldAnalyzer.Analyze(frame.BgraPixels.ToArray(), frame.Width, frame.Height);
+                        var map = _minimapAnalyzer.Analyze(frame.BgraPixels.Span, frame.Width, frame.Height, _profile.MinimapRegion, frame.CapturedAt);
                         _history.Add(state, frame.CapturedAt);
-                        var activeRecommendations = _coach.Evaluate(state, _history);
-                        var visibleRecommendations = _recommendationCoordinator.Apply(activeRecommendations);
-                        await PersistCycleAsync(frame.CapturedAt, state, activeRecommendations, cancellationToken);
                         var health = CalculateVisionHealth(state);
                         var lifecycle = _lifecycle.ObserveFrame(false, 6 - health.UnavailableFields);
+                        var planning = lifecycle == GameLifecycleState.GameActive
+                            ? await _strategy.UpdateAsync(state, _history, map, frame.CapturedAt, cancellationToken)
+                            : _strategy.Pause(frame.CapturedAt, "等待可靠的 Active 遊戲狀態");
+                        var activeRecommendations = GamePlanRecommendationAdapter.Convert(planning.Plan);
+                        var visibleRecommendations = _recommendationCoordinator.Apply(activeRecommendations);
+                        await PersistCycleAsync(frame.CapturedAt, state, activeRecommendations, cancellationToken);
                         LogLifecycle(lifecycle);
                         LogRecommendations(visibleRecommendations);
                         var status = lifecycle == GameLifecycleState.GameLoading
@@ -105,7 +105,8 @@ public sealed class LiveCoachService(
                             : $"監測中 · {FormatAge(state.Age)}";
                         await onUpdate(new LiveCoachUpdate(true, status, lifecycle, state,
                             lifecycle == GameLifecycleState.GameActive ? visibleRecommendations : [],
-                            health.Confidence, health.UnavailableFields, DateTimeOffset.UtcNow - cycleStartedAt, world));
+                            health.Confidence, health.UnavailableFields, DateTimeOffset.UtcNow - cycleStartedAt,
+                            world, map, planning.Plan, planning.Status, _strategy.RuntimeStatus));
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -204,6 +205,7 @@ public sealed class LiveCoachService(
     public void Dispose()
     {
         _ocr.Dispose();
+        _strategy.Dispose();
     }
 
     public void DismissRecommendation(string recommendationId) =>
@@ -219,7 +221,11 @@ public sealed record LiveCoachUpdate(
     double VisionConfidence,
     int UnavailableFields,
     TimeSpan AnalysisLatency,
-    WorldObservation? World = null)
+    WorldObservation? World = null,
+    MapContext? Map = null,
+    GamePlan? Plan = null,
+    string? PlanningStatus = null,
+    PlannerRuntimeStatus? LlmStatus = null)
 {
     public static LiveCoachUpdate Disconnected(GameLifecycleState lifecycle, string status) =>
         new(false, status, lifecycle, null, [], 0, 6, TimeSpan.Zero);

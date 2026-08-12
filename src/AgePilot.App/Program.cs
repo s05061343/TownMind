@@ -10,6 +10,12 @@ using AgePilot.Infrastructure.Persistence;
 using AgePilot.Vision.Benchmarking;
 using AgePilot.Infrastructure.Diagnostics;
 using System.Runtime.InteropServices;
+using AgePilot.Core;
+using AgePilot.Core.History;
+using AgePilot.Core.Observations;
+using AgePilot.Core.Planning;
+using AgePilot.Infrastructure.Planning;
+using System.Text.Json;
 
 if (args.Length > 0)
 {
@@ -28,6 +34,7 @@ return args switch
     ["vision-report", var manifestPath, var outputPath] => VisionReport(manifestPath, outputPath),
     ["replay-report", var manifestPath, var outputPath, var cycles] => ReplayReport(manifestPath, outputPath, cycles),
     ["live-benchmark", var profilePath, var outputPath, var seconds] => await LiveBenchmarkAsync(profilePath, outputPath, seconds),
+    ["plan-smoke"] => await PlanSmokeAsync(),
     _ => ShowUsage(),
 };
 
@@ -259,7 +266,34 @@ static int ShowUsage()
     Console.WriteLine("  vision-report <manifest-path> <output-json-path>");
     Console.WriteLine("  replay-report <manifest-path> <output-json-path> <cycles>");
     Console.WriteLine("  live-benchmark <hud-profile-path> <output-json-path> <seconds>");
+    Console.WriteLine("  plan-smoke");
     return 1;
+}
+
+static async Task<int> PlanSmokeAsync()
+{
+    var now = DateTimeOffset.UtcNow;
+    var settings = new AppSettings { LlmPlanningTimeoutSeconds = 120 };
+    using var planner = new LlamaServerPlanner(settings);
+    var state = new GameState
+    {
+        Age = GameAge.Dark,
+        Food = new(410, 0.95, now, ObservationStatus.Confirmed),
+        Wood = new(260, 0.95, now, ObservationStatus.Confirmed),
+        Gold = new(40, 0.95, now, ObservationStatus.Confirmed),
+        Stone = new(200, 0.95, now, ObservationStatus.Confirmed),
+        Population = new(18, 0.95, now, ObservationStatus.Confirmed),
+        PopulationCap = new(20, 0.95, now, ObservationStatus.Confirmed),
+    };
+    var history = new GameHistory(); history.Add(state, now);
+    var map = new MapContext(MapArchetype.Island, 0.62, 0.12, 0.18, 0.48, 2, 0.35, 0.88,
+        ObservationStatus.Confirmed, now, 3);
+    var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
+        map, null, [new PlanningEvent("smoke_test", "固定島嶼經濟案例", now)], now);
+    var result = await planner.PlanAsync(context, CancellationToken.None);
+    if (!result.Success) { Console.Error.WriteLine(result.Error); return 7; }
+    Console.WriteLine(JsonSerializer.Serialize(result.Plan, new JsonSerializerOptions { WriteIndented = true, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } }));
+    return 0;
 }
 
 static string ResolveInputPath(string path)
