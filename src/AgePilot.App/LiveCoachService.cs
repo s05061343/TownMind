@@ -8,13 +8,12 @@ using AgePilot.Vision.Observations;
 using AgePilot.Vision.Ocr;
 using AgePilot.Vision.Profiles;
 using AgePilot.Infrastructure.Diagnostics;
-using AgePilot.Core.Automation;
-using AgePilot.Vision.World;
 using AgePilot.Core.Configuration;
 using AgePilot.Core.Planning;
 using AgePilot.Infrastructure.Planning;
 using AgePilot.Vision.Images;
 using AgePilot.Vision.Geometry;
+using AgePilot.Vision.World;
 
 namespace AgePilot.App;
 
@@ -33,7 +32,6 @@ public sealed class LiveCoachService(
     private readonly StrategyEngine _strategy = new(new LlamaServerPlanner(settings, logger));
     private readonly RecommendationCoordinator _recommendationCoordinator = new();
     private readonly GameLifecycleTracker _lifecycle = new();
-    private readonly GenericWorldAnalyzer _worldAnalyzer = new();
     private readonly MinimapAnalyzer _minimapAnalyzer = new();
     private readonly HudProfile _profile = HudProfileLoader.Load(profilePath);
     private readonly ISessionRepository? _sessions = sessionRepository;
@@ -91,14 +89,13 @@ public sealed class LiveCoachService(
                             continue;
                         }
                         var state = _estimator.Update(raw, frame.CapturedAt);
-                        var world = _worldAnalyzer.Analyze(frame.BgraPixels.ToArray(), frame.Width, frame.Height);
                         var map = _minimapAnalyzer.Analyze(frame.BgraPixels.Span, frame.Width, frame.Height, _profile.MinimapRegion, frame.CapturedAt);
                         var visual = new VisualObservation(frame.Width, frame.Height,
                             VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
-                                new NormalizedRect(0, 0.66, 0.47, 0.34),
+                                _profile.CommandPanelRegion ?? new NormalizedRect(0, 0.66, 0.47, 0.34),
                                 _profile.MinimapRegion ?? new NormalizedRect(0.80, 0.67, 0.20, 0.33),
                                 new NormalizedRect(0, 0, 0.45, 0.06)),
-                            "top_hud=resources; command_panel=bottom-left; minimap=bottom-right; world=center; do not click top HUD, command panel unless intentionally using its buttons, scoreboard, or overlay",
+                            $"panorama=完整遊戲視窗；top_hud=資源；command_panel=左下指令；minimap=右下小地圖；所有遊戲輸入僅限滑鼠；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}；世界座標以 panorama normalized [0,1] 表示",
                             _previousVisualAction, _previousVisualResult);
                         _history.Add(state, frame.CapturedAt);
                         var health = CalculateVisionHealth(state);
@@ -117,7 +114,7 @@ public sealed class LiveCoachService(
                         await onUpdate(new LiveCoachUpdate(true, status, lifecycle, state,
                             lifecycle == GameLifecycleState.GameActive ? visibleRecommendations : [],
                             health.Confidence, health.UnavailableFields, DateTimeOffset.UtcNow - cycleStartedAt,
-                            world, map, planning.Plan, planning.Status, _strategy.RuntimeStatus));
+                            map, planning.Plan, planning.Status, _strategy.RuntimeStatus));
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -239,7 +236,6 @@ public sealed record LiveCoachUpdate(
     double VisionConfidence,
     int UnavailableFields,
     TimeSpan AnalysisLatency,
-    WorldObservation? World = null,
     MapContext? Map = null,
     GamePlan? Plan = null,
     string? PlanningStatus = null,

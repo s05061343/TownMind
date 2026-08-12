@@ -21,6 +21,7 @@
 | [decisions/0007-local-llm-escalation.md](decisions/0007-local-llm-escalation.md) | Local LLM 的低頻異常升級、輸出白名單與效能邊界 | 規劃或實作 Local LLM 判斷時 |
 | [decisions/0008-unified-local-llm-planner.md](decisions/0008-unified-local-llm-planner.md) | 統一 GamePlan、Qwen3 本機 runtime、小地圖上下文與安全邊界 | 修改提示、規劃或未來自動執行時 |
 | [decisions/0009-gameplan-development-executor.md](decisions/0009-gameplan-development-executor.md) | GamePlan 唯一執行來源、發展閉環、Preview／Armed 與安全 Gate | 修改自動發展、建築、科技或執行狀態機時 |
+| [decisions/0010-mouse-only-game-control.md](decisions/0010-mouse-only-game-control.md) | 遊戲內純滑鼠控制、命令格位校準與逐步確認 | 修改自動操作、VLM 工具或輸入後端時 |
 | [guides/running-phase0.md](guides/running-phase0.md) | 建置、參考圖 OCR、即時單幀掃描與已知限制 | 執行或驗證目前程式時 |
 | [brand/branding.md](brand/branding.md) | 老鷹徽章、色彩、使用規則與資產重建方式 | 修改 UI、封裝、網站或發佈素材時 |
 

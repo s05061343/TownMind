@@ -64,7 +64,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             {
                 model = "agepilot-local",
                 temperature = 0.2,
-                max_tokens = 512,
+                max_tokens = 1024,
                 messages = new object[]
                 {
                     new { role = "system", content = SystemPrompt },
@@ -80,10 +80,10 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
                 ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
             var now = DateTimeOffset.UtcNow;
-            var toolAction = new VisualToolAction(dto.Action.Tool, dto.Action.Keys ?? [], dto.Action.X, dto.Action.Y,
-                dto.Action.EndX, dto.Action.EndY);
+            var toolAction = new VisualToolAction(dto.Action.Tool, dto.Action.Space, dto.Action.Target ?? "", dto.Action.X, dto.Action.Y,
+                dto.Action.EndX, dto.Action.EndY, dto.Action.Row, dto.Action.Column);
             var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, toolAction,
-                dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence);
+                dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence, dto.PreviousActionResult);
             var action = new PlannedAction(PlannedActionKind.Reobserve, 80, dto.Reason,
                 RecheckSeconds: Math.Clamp((int)Math.Ceiling(dto.RecheckAfterMs / 1000d), 5, 30),
                 SuccessCondition: dto.ExpectedResult);
@@ -373,7 +373,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     private const string SystemPrompt = """
 /no_think
-你是資深、謹慎的 AOE2 DE 玩家，完整遊戲截圖是主要觀測；OCR 與小地圖摘要只是輔助證據。先辨認當前 UI 模式（未選取、單位／建築已選取、建築選單、建築放置、研究／生產中），再決定只推進一個 UI 狀態的下一步。每次只能輸出一個原子工具：Observe、Wait、KeySequence、LeftClick、RightClick 或 Drag。Goal 與 ExpectedResult 都只能描述這一個原子操作的直接結果，不得宣稱一次點擊會完成多棟建築、多項研究或整套策略。紅色建築預覽代表目前游標落點非法，不可在紅色預覽內左鍵確認；可點另一個明顯空曠位置或取消後重看。不要虛構 AOE2 機制（例如市場不會直接提高採集收入），不要因長期目標忽略目前正在進行的放置／選取狀態。座標是整個遊戲視窗的 normalized [0,1] 座標。按鍵陣列每項是一個 chord，例如 H、Ctrl+H；不得輸出腳本、作業系統命令或多步巨集。若不確定、畫面矛盾、尚需等待或上一動作結果不明，選 Observe 或 Wait。不要輸出思考過程或 Markdown，嚴格依 JSON schema 回覆。
+你是謹慎的 AOE2 DE 經濟發展玩家。所有遊戲操作只能使用滑鼠，禁止快捷鍵與鍵盤輸入。panorama 是完整遊戲畫面；command_panel 是左下指令面板；minimap 是右下小地圖。每輪只輸出一個原子工具：Observe、Wait、LeftClick、RightClick 或 Drag。世界目標使用 Panorama normalized 座標；小地圖使用 Minimap 局部 normalized 座標；命令按鈕使用 CommandGrid 的 row 1..3、column 1..5，不得猜全畫面小圖示座標。每個輸入動作都必須用 target 簡述畫面上可見的目標證據。選取村民或建築後，下一輪必須從單位資訊與命令面板確認選取結果；未確認前只能 Observe 或 Wait。若 context 有 previousAction，先設定 previousActionResult；無法確認時必須 Uncertain 且不得提出新輸入。紅色建築預覽不可確認。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。不要輸出 Markdown，嚴格依 JSON schema 回覆。
 """;
 
     private static readonly object ResponseFormat = new
@@ -387,7 +387,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             {
                 ["type"] = "object",
                 ["additionalProperties"] = false,
-                ["required"] = new[] { "assessment", "goal", "reason", "confidence", "action", "expectedResult", "recheckAfterMs" },
+                ["required"] = new[] { "assessment", "goal", "reason", "confidence", "action", "expectedResult", "recheckAfterMs", "previousActionResult" },
                 ["properties"] = new Dictionary<string, object>
                 {
                     ["assessment"] = new { type = "string" },
@@ -396,11 +396,12 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
                     ["expectedResult"] = new { type = "string" },
                     ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
+                    ["previousActionResult"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PreviousActionResult>() },
                     ["action"] = new Dictionary<string, object>
                     {
                         ["type"] = "object",
                         ["additionalProperties"] = false,
-                        ["required"] = new[] { "tool", "keys", "x", "y", "endX", "endY" },
+                        ["required"] = new[] { "tool", "space", "target", "x", "y", "endX", "endY", "row", "column" },
                         ["properties"] = new Dictionary<string, object>
                         {
                             ["tool"] = new Dictionary<string, object>
@@ -408,11 +409,14 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                                 ["type"] = "string",
                                 ["enum"] = Enum.GetNames<VisualToolKind>(),
                             },
-                            ["keys"] = new { type = "array", maxItems = 6, items = new { type = "string", maxLength = 16 } },
+                            ["space"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<VisualCoordinateSpace>() },
+                            ["target"] = new { type = "string", maxLength = 80 },
                             ["x"] = new { type = "number", minimum = 0, maximum = 1 },
                             ["y"] = new { type = "number", minimum = 0, maximum = 1 },
                             ["endX"] = new { type = "number", minimum = 0, maximum = 1 },
                             ["endY"] = new { type = "number", minimum = 0, maximum = 1 },
+                            ["row"] = new { type = "integer", minimum = 0, maximum = 3 },
+                            ["column"] = new { type = "integer", minimum = 0, maximum = 5 },
                         },
                     },
                 },
@@ -424,7 +428,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private sealed record CompletionChoice(CompletionMessage Message);
     private sealed record CompletionMessage(string Content);
     private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence,
-        VisualActionDto Action, string ExpectedResult, int RecheckAfterMs);
-    private sealed record VisualActionDto(VisualToolKind Tool, IReadOnlyList<string>? Keys,
-        double X, double Y, double EndX, double EndY);
+        VisualActionDto Action, string ExpectedResult, int RecheckAfterMs, PreviousActionResult PreviousActionResult);
+    private sealed record VisualActionDto(VisualToolKind Tool, VisualCoordinateSpace Space, string? Target,
+        double X, double Y, double EndX, double EndY, int Row, int Column);
 }

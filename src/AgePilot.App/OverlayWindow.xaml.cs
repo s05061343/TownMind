@@ -35,6 +35,8 @@ public partial class OverlayWindow : Window
     private nint _windowHandle;
     private bool _isClickThrough;
     private string? _currentRecommendationId;
+    private bool _stopHotKeyRegistered;
+    private double _expandedHeight;
 
     public OverlayWindow(
         string profilePath,
@@ -53,6 +55,7 @@ public partial class OverlayWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        _expandedHeight = Height;
         _monitorTask = Task.Run(async () =>
         {
             try
@@ -107,8 +110,8 @@ public partial class OverlayWindow : Window
 
     private static string Describe(VisualToolAction action) => action.Tool switch
     {
-        VisualToolKind.KeySequence => $"按鍵 {string.Join(',', action.Keys)}",
-        VisualToolKind.LeftClick => $"左鍵 {action.X:P0},{action.Y:P0}",
+        VisualToolKind.LeftClick when action.Space == VisualCoordinateSpace.CommandGrid => $"左鍵命令格位 {action.Row},{action.Column}（{action.Target}）",
+        VisualToolKind.LeftClick => $"左鍵 {action.Space} {action.X:P0},{action.Y:P0}（{action.Target}）",
         VisualToolKind.RightClick => $"右鍵 {action.X:P0},{action.Y:P0}",
         VisualToolKind.Drag => $"拖曳 {action.X:P0},{action.Y:P0} → {action.EndX:P0},{action.EndY:P0}",
         _ => action.Tool.ToString(),
@@ -143,7 +146,7 @@ public partial class OverlayWindow : Window
         source?.AddHook(WindowMessageHook);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleVisibility, ModifierControl | ModifierShift, VirtualKeyA);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleClickThrough, ModifierControl | ModifierShift, VirtualKeyC);
-        RegisterAutomationHotKeys();
+        _stopHotKeyRegistered = RegisterAutomationHotKeys();
         AutomationToggleButton.IsEnabled = true;
         UpdateAutomationUi();
     }
@@ -166,14 +169,15 @@ public partial class OverlayWindow : Window
                 handled = true;
                 break;
             case HotKeyAutomationStart:
-                _automation.Enable();
-                if (_automation.IsEnabled && !_isClickThrough) ToggleClickThrough();
+                if (!_stopHotKeyRegistered) _automation.Disable("緊急停止熱鍵註冊失敗，禁止啟用");
+                else _automation.Enable();
+                if (_automation.IsEnabled) SetCompactMode(true);
                 UpdateAutomationUi();
                 handled = true;
                 break;
             case HotKeyAutomationStop:
                 _automation.Disable("Ctrl+F12 緊急停止");
-                if (_isClickThrough) ToggleClickThrough();
+                SetCompactMode(false);
                 UpdateAutomationUi();
                 handled = true;
                 break;
@@ -186,10 +190,20 @@ public partial class OverlayWindow : Window
 
     private void OnToggleAutomation(object sender, RoutedEventArgs e)
     {
+        if (!_automation.IsEnabled && !_stopHotKeyRegistered)
+        { _automation.Disable("緊急停止熱鍵註冊失敗，禁止啟用"); UpdateAutomationUi(); return; }
         _automation.Toggle(requireDashboardPermission: false);
-        if (_automation.IsEnabled && !_isClickThrough) ToggleClickThrough();
-        if (!_automation.IsEnabled && _isClickThrough) ToggleClickThrough();
+        SetCompactMode(_automation.IsEnabled);
+        if (_automation.IsEnabled) FocusGameWindow();
         UpdateAutomationUi();
+    }
+
+    private void SetCompactMode(bool compact)
+    {
+        Height = compact ? 185 : _expandedHeight;
+        AdviceTitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        AdviceDescription.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        OtherAdviceText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void UpdateAutomationUi()
@@ -244,6 +258,7 @@ public partial class OverlayWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _automation.Disable("Overlay 已關閉");
         if (_windowHandle != nint.Zero)
         {
             _ = UnregisterHotKey(_windowHandle, HotKeyToggleVisibility);
@@ -264,15 +279,15 @@ public partial class OverlayWindow : Window
             TaskScheduler.Default);
     }
 
-    private void RegisterAutomationHotKeys()
+    private bool RegisterAutomationHotKeys()
     {
-        RegisterConfiguredHotKey(HotKeyAutomationStart, _settings.AutomationStartHotKey);
-        RegisterConfiguredHotKey(HotKeyAutomationStop, _settings.AutomationStopHotKey);
+        _ = RegisterConfiguredHotKey(HotKeyAutomationStart, _settings.AutomationStartHotKey);
+        return RegisterConfiguredHotKey(HotKeyAutomationStop, _settings.AutomationStopHotKey);
     }
 
-    private void RegisterConfiguredHotKey(int id, string gesture)
+    private bool RegisterConfiguredHotKey(int id, string gesture)
     {
-        var chord = InputSequence.ParseHotKey(gesture);
+        var chord = GlobalHotKeyParser.Parse(gesture);
         uint modifiers = 0;
         foreach (var key in chord.Keys.Take(chord.Keys.Count - 1))
         {
@@ -285,7 +300,13 @@ public partial class OverlayWindow : Window
             int.TryParse(primary[1..], out var functionNumber)
             ? (uint)(0x70 + functionNumber - 1)
             : char.ToUpperInvariant(primary[0]);
-        _ = RegisterHotKey(_windowHandle, id, modifiers, virtualKey);
+        return RegisterHotKey(_windowHandle, id, modifiers, virtualKey);
+    }
+
+    private static void FocusGameWindow()
+    {
+        var game = new AgePilot.Vision.Capture.WindowsGameWindowLocator().Find();
+        if (game is not null) _ = SetForegroundWindow(game.Handle);
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -301,4 +322,8 @@ public partial class OverlayWindow : Window
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern nint SetWindowLongPtr(nint window, int index, nint newValue);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
 }

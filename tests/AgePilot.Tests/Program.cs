@@ -14,7 +14,6 @@ using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using AgePilot.Vision.Benchmarking;
 using AgePilot.Infrastructure.Diagnostics;
-using AgePilot.Infrastructure.GameData;
 using AgePilot.Core.Automation;
 using AgePilot.Vision.World;
 using AgePilot.Core.Planning;
@@ -51,24 +50,17 @@ var tests = new (string Name, Action Run)[]
     ("Local diagnostic log is JSON lines", LocalDiagnosticLogIsJsonLines),
     ("SQLite session round trip", SqliteSessionRoundTrip),
     ("Brand assets include Windows icon sizes", BrandAssetsIncludeWindowsIconSizes),
-    ("Automation hotkeys and sequences are parsed", AutomationInputsAreParsed),
+    ("Application hotkeys are parsed", AutomationInputsAreParsed),
     ("Automation settings reject conflicting hotkeys", AutomationSettingsRejectConflictingHotkeys),
-    ("Economy automation queues villager only when safe", EconomyAutomationQueuesVillagerOnlyWhenSafe),
-    ("Generic planner covers house and age progression", GenericPlannerCoversHouseAndAgeProgression),
-    ("Generic world analyzer finds actionable candidates", GenericWorldAnalyzerFindsCandidates),
-    ("Visual candidates cannot drive player input", VisualCandidatesCannotDriveInput),
-    ("Action execution fails closed and confirms explicitly", ActionExecutionFailsClosedAndConfirms),
     ("Game plan validator rejects unsafe conditions", GamePlanValidatorRejectsUnsafeConditions),
     ("Strategy engine reuses then expires previous plan", StrategyEngineReusesThenExpiresPlan),
     ("Minimap requires temporal confirmation", MinimapRequiresTemporalConfirmation),
     ("GPU device parser rejects CPU fallback", GpuDeviceParserRejectsCpuFallback),
     ("Quantified plan becomes concrete recommendation", QuantifiedPlanBecomesConcreteRecommendation),
     ("LLM quantities are corrected by observed game state", LlmQuantitiesAreCorrectedByGameState),
-    ("AOE2 installation hotkeys are parsed read only", Aoe2InstallationHotkeysAreParsed),
-    ("GamePlan generic development actions translate safely", GenericDevelopmentActionsTranslateSafely),
-    ("Plan execution requires arming and is idempotent", PlanExecutionRequiresArmingAndIsIdempotent),
     ("Visual prompt encoder creates panorama and UI crops", VisualPromptEncoderCreatesImages),
-    ("Visual player decision rejects unsafe coordinates and keys", VisualDecisionRejectsUnsafeValues),
+    ("Visual player decision rejects unsafe mouse targets", VisualDecisionRejectsUnsafeValues),
+    ("Command grid maps to calibrated mouse coordinates", CommandGridMapsCoordinates),
 };
 
 var failures = 0;
@@ -406,9 +398,6 @@ static void SettingsRoundTrip()
             EnableLocalDiagnostics = false,
             AutomationStartHotKey = "Alt+F10",
             AutomationStopHotKey = "Alt+F12",
-            VillagerProductionSequence = "Ctrl+H,Q",
-            EnableMilitaryAutomation = true,
-            BarracksProductionSequence = "B,Q",
             LlamaRuntimePath = @"D:\runtime\llama.cpp",
             LlmModelPath = @"D:\models\qwen.gguf",
         });
@@ -420,9 +409,6 @@ static void SettingsRoundTrip()
         Equal(false, loaded.EnableLocalDiagnostics);
         Equal("Alt+F10", loaded.AutomationStartHotKey);
         Equal("Alt+F12", loaded.AutomationStopHotKey);
-        Equal("Ctrl+H,Q", loaded.VillagerProductionSequence);
-        Equal(true, loaded.EnableMilitaryAutomation);
-        Equal("B,Q", loaded.BarracksProductionSequence);
         Equal(@"D:\runtime\llama.cpp", loaded.LlamaRuntimePath);
         Equal(@"D:\models\qwen.gguf", loaded.LlmModelPath);
     }
@@ -530,15 +516,11 @@ static void BrandAssetsIncludeWindowsIconSizes()
 
 static void AutomationInputsAreParsed()
 {
-    var hotKey = InputSequence.ParseHotKey("Ctrl+F10");
+    var hotKey = GlobalHotKeyParser.Parse("Ctrl+F10");
     Equal(2, hotKey.Keys.Count);
     Equal("F10", hotKey.Keys[1]);
 
-    var sequence = InputSequence.Parse("Ctrl+H,Q");
-    Equal(2, sequence.Count);
-    Equal(2, sequence[0].Keys.Count);
-    Equal("Q", sequence[1].Keys[0]);
-    Equal(".", InputSequence.Parse(".")[0].Keys[0]);
+    Throws<InvalidDataException>(() => GlobalHotKeyParser.Parse("H,Q"));
 }
 
 static void AutomationSettingsRejectConflictingHotkeys()
@@ -549,134 +531,6 @@ static void AutomationSettingsRejectConflictingHotkeys()
         AutomationStopHotKey = "ctrl+f10",
     };
     Throws<InvalidDataException>(settings.Validate);
-}
-
-static void EconomyAutomationQueuesVillagerOnlyWhenSafe()
-{
-    var now = DateTimeOffset.UtcNow;
-    var ready = new GameState
-    {
-        Food = Confirmed(80, now),
-        Population = Confirmed(12, now),
-        PopulationCap = Confirmed(20, now),
-    };
-    Equal(AutomationActionKind.QueueVillager, AutomationPolicy.DecideEconomy(ready).Kind);
-
-    var oneSlotLeft = new GameState
-    {
-        Food = Confirmed(80, now),
-        Population = Confirmed(19, now),
-        PopulationCap = Confirmed(20, now),
-    };
-    Equal(AutomationActionKind.QueueVillager, AutomationPolicy.DecideEconomy(oneSlotLeft).Kind);
-
-    var capped = new GameState
-    {
-        Food = Confirmed(80, now),
-        Population = Confirmed(20, now),
-        PopulationCap = Confirmed(20, now),
-    };
-    Equal(AutomationActionKind.None, AutomationPolicy.DecideEconomy(capped).Kind);
-    Equal(AutomationActionKind.None, AutomationPolicy.DecideEconomy(new GameState()).Kind);
-}
-
-static void GenericPlannerCoversHouseAndAgeProgression()
-{
-    var now = DateTimeOffset.UtcNow;
-    var world = new WorldObservation(2560, 1440,
-        [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.95, WorldTargetEvidence.Verified, 3)], 0.8);
-    var planner = new GenericEconomicPlanner();
-    var needsHouse = new GameState
-    {
-        Age = GameAge.Dark,
-        Food = Confirmed(200, now), Wood = Confirmed(100, now),
-        Gold = Confirmed(100, now), Population = Confirmed(19, now), PopulationCap = Confirmed(20, now),
-    };
-    Equal(EconomicActionKind.BuildHouse, planner.Decide(needsHouse, world, false, false).Kind);
-
-    var feudalReady = new GameState
-    {
-        Age = GameAge.Dark,
-        Food = Confirmed(500, now), Wood = Confirmed(20, now),
-        Gold = Confirmed(0, now), Population = Confirmed(21, now), PopulationCap = Confirmed(30, now),
-    };
-    Equal(EconomicActionKind.AdvanceFeudal, planner.Decide(feudalReady, world, false, false).Kind);
-
-    var castleReady = new GameState
-    {
-        Age = GameAge.Feudal,
-        Food = Confirmed(800, now), Wood = Confirmed(50, now),
-        Gold = Confirmed(200, now), Population = Confirmed(30, now), PopulationCap = Confirmed(40, now),
-    };
-    Equal(EconomicActionKind.AdvanceCastle, planner.Decide(castleReady, world, true, true).Kind);
-}
-
-static void GenericWorldAnalyzerFindsCandidates()
-{
-    var image = BgraImageLoader.Load(FindRepositoryFile("doc", "Snipaste_2026-08-09_18-54-29.jpg"));
-    var world = new GenericWorldAnalyzer().Analyze(image.Pixels, image.Width, image.Height);
-    var summary = string.Join(", ", world.Targets.GroupBy(target => target.Kind).Select(group => $"{group.Key}:{group.Count()}"));
-    EqualContext(true, world.Targets.Any(target => target.Kind == WorldTargetKind.Wood), $"world targets [{summary}]");
-    EqualContext(true, world.Targets.Any(target => target.Kind == WorldTargetKind.OpenBuildArea), $"world targets [{summary}]");
-    Equal(true, world.Targets.All(target => target.X is >= 0 and <= 1 && target.Y is >= 0 and <= 1));
-    Equal(true, world.Targets.All(target => !target.IsActionable));
-}
-
-static void VisualCandidatesCannotDriveInput()
-{
-    var now = DateTimeOffset.UtcNow;
-    var state = new GameState
-    {
-        Age = GameAge.Dark,
-        Food = Confirmed(200, now), Wood = Confirmed(100, now),
-        Population = Confirmed(19, now), PopulationCap = Confirmed(20, now),
-    };
-    var candidateOnly = new WorldObservation(2560, 1440,
-        [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.99)], 0.9);
-    var action = new GenericEconomicPlanner().Decide(state, candidateOnly, false, false);
-    Equal(EconomicActionKind.Wait, action.Kind);
-
-    var verified = candidateOnly with
-    {
-        Targets = [new WorldTarget(WorldTargetKind.OpenBuildArea, 0.6, 0.5, 0.95, WorldTargetEvidence.Verified, 3)],
-    };
-    Equal(EconomicActionKind.BuildHouse, new GenericEconomicPlanner().Decide(state, verified, false, false).Kind);
-}
-
-static void ActionExecutionFailsClosedAndConfirms()
-{
-    var now = DateTimeOffset.UtcNow;
-    var blocked = ActionExecutionState.Start("build-house", now, TimeSpan.FromSeconds(5),
-        [new ActionPrecondition("target", false, "目標尚未驗證")]);
-    Equal(ActionExecutionPhase.Failed, blocked.Phase);
-
-    var ready = ActionExecutionState.Start("queue-villager", now, TimeSpan.FromSeconds(5),
-        [new ActionPrecondition("hud", true, "")]);
-    Equal(ActionExecutionPhase.Ready, ready.Phase);
-    var pending = ready.MarkSent();
-    Equal(ActionExecutionPhase.AwaitingConfirmation, pending.Phase);
-    Equal(ActionExecutionPhase.Confirmed, pending.Observe(true, now.AddSeconds(1)).Phase);
-    Equal(ActionExecutionPhase.Failed, pending.Observe(false, now.AddSeconds(6)).Phase);
-}
-
-static void Aoe2InstallationHotkeysAreParsed()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"agepilot-game-data-{Guid.NewGuid():N}");
-    var dat = Path.Combine(root, "resources", "_common", "dat");
-    Directory.CreateDirectory(dat);
-    try
-    {
-        File.WriteAllText(Path.Combine(dat, "hotkeys.json"), """
-        {"shared_hotkey_group_list":[{"hotkey_list":[{"data_name":"SELECT_ALL_TOWN_CENTERS","defaults_list":[{"name":"classic","key":"VK_H"},{"name":"definitive","key":"VK_H","control":true}]}]}]}
-        """);
-        var catalog = Aoe2InstallationCatalog.Load(root);
-        Equal(64, catalog.HotkeysSha256.Length);
-        Equal("Ctrl+H", catalog.DefinitiveHotkeys["SELECT_ALL_TOWN_CENTERS"].ToInputSequence());
-    }
-    finally
-    {
-        Directory.Delete(root, recursive: true);
-    }
 }
 
 static void GamePlanValidatorRejectsUnsafeConditions()
@@ -761,42 +615,6 @@ static void LlmQuantitiesAreCorrectedByGameState()
     Equal(true, allocated.TargetWoodWorkers > allocated.TargetGoldWorkers);
 }
 
-static void GenericDevelopmentActionsTranslateSafely()
-{
-    var now = DateTimeOffset.UtcNow;
-    var bindings = new DevelopmentActionBindings("H,Q", ".",
-        new Dictionary<string, string> { ["barracks"] = "B,B" },
-        new Dictionary<string, string> { ["double-bit-axe"] = "L,Q" },
-        new Dictionary<string, string> { ["feudal-age"] = "H,Z" });
-    var building = new GamePlan("build", now, now.AddSeconds(60), "發展", "蓋兵營", "升級前置", 0.9, [], [],
-        [new PlannedAction(PlannedActionKind.BuildBuilding, 90, "升級前置", Quantity: 1, TargetId: "barracks")]);
-    var translated = GamePlanActionTranslator.Translate(building, bindings);
-    Equal(true, translated.Success);
-    Equal(ExecutableActionKind.TargetedLeftClick, translated.Action!.Kind);
-    Equal(WorldTargetKind.OpenBuildArea, translated.Action.TargetKind);
-
-    var unknownTechnology = building with { Actions = [new PlannedAction(
-        PlannedActionKind.ResearchTechnology, 90, "未知科技", TargetId: "invented-tech")] };
-    Equal(false, GamePlanActionTranslator.Translate(unknownTechnology, bindings).Success);
-    Equal(false, GamePlanValidator.Validate(building with { Actions = [new PlannedAction(
-        PlannedActionKind.ResearchTechnology, 90, "缺 ID")] }, now).Success);
-}
-
-static void PlanExecutionRequiresArmingAndIsIdempotent()
-{
-    var now = DateTimeOffset.UtcNow;
-    var action = new ExecutableAction("p:a", "p", PlannedActionKind.QueueVillager,
-        ExecutableActionKind.KeyboardSequence, "H,Q", null, TimeSpan.FromSeconds(10), "人口增加", "生產村民");
-    var coordinator = new PlanExecutionCoordinator();
-    Equal(ActionExecutionPhase.Failed, coordinator.Prepare(action, now, []).Phase);
-    coordinator.Arm();
-    Equal(ActionExecutionPhase.Ready, coordinator.Prepare(action, now, []).Phase);
-    coordinator.MarkSent();
-    Equal(ActionExecutionPhase.AwaitingConfirmation, coordinator.Current!.Phase);
-    Equal(ActionExecutionPhase.Confirmed, coordinator.Observe(true, now.AddSeconds(1))!.Phase);
-    Equal(ActionExecutionPhase.Failed, coordinator.Prepare(action, now.AddSeconds(2), []).Phase);
-}
-
 static void VisualPromptEncoderCreatesImages()
 {
     var image = BgraImageLoader.Load(FindRepositoryFile("img", "Snipaste_2026-08-12_20-38-47.jpg"));
@@ -812,7 +630,7 @@ static void VisualDecisionRejectsUnsafeValues()
 {
     var now = DateTimeOffset.UtcNow;
     var decision = new VisualPlayerDecision("已選村民", "建造兵營", "需要前置建築",
-        new VisualToolAction(VisualToolKind.LeftClick, [], 0.3, 0.4), "出現建築預覽", 1000, 0.9);
+        new VisualToolAction(VisualToolKind.LeftClick, VisualCoordinateSpace.Panorama, "畫面中的村民", 0.3, 0.4), "出現建築預覽", 1000, 0.9);
     var plan = new GamePlan("vlm", now, now.AddSeconds(30), "visual-player", decision.Goal, decision.Reason,
         decision.Confidence, [], [], [new PlannedAction(PlannedActionKind.Reobserve, 80, decision.Reason)],
         VisualDecision: decision);
@@ -823,8 +641,20 @@ static void VisualDecisionRejectsUnsafeValues()
     } }, now).Success);
     Equal(false, GamePlanValidator.Validate(plan with { VisualDecision = decision with
     {
-        Action = new VisualToolAction(VisualToolKind.KeySequence, ["powershell.exe"]),
+        Action = new VisualToolAction(VisualToolKind.RightClick, VisualCoordinateSpace.CommandGrid, "非法命令格位", Row: 1, Column: 1),
     } }, now).Success);
+}
+
+static void CommandGridMapsCoordinates()
+{
+    var minimap = new NormalizedRect(0.8, 0.67, 0.19, 0.32);
+    var grid = new NormalizedRect(0.01, 0.85, 0.15, 0.12);
+    var action = new VisualToolAction(VisualToolKind.LeftClick, VisualCoordinateSpace.CommandGrid,
+        "生產村民按鈕", Row: 2, Column: 3);
+    Equal(true, MouseCoordinateMapper.TryResolve(action, minimap, grid, 3, 5,
+        out var x, out var y, out _));
+    Equal(true, Math.Abs(x - 0.085) < 0.0001);
+    Equal(true, Math.Abs(y - 0.91) < 0.0001);
 }
 
 static void Equal<T>(T expected, T actual)

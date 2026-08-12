@@ -85,17 +85,6 @@ public partial class DashboardWindow : Window
         AutomationInputCheck.IsChecked = _settings.EnableAutomationInput;
         AutomationStartHotKeyText.Text = _settings.AutomationStartHotKey;
         AutomationStopHotKeyText.Text = _settings.AutomationStopHotKey;
-        VillagerSequenceText.Text = _settings.VillagerProductionSequence;
-        MilitaryAutomationCheck.IsChecked = _settings.EnableMilitaryAutomation;
-        BarracksSequenceText.Text = _settings.BarracksProductionSequence;
-        ArcheryRangeSequenceText.Text = _settings.ArcheryRangeProductionSequence;
-        StableSequenceText.Text = _settings.StableProductionSequence;
-        IdleVillagerSequenceText.Text = _settings.IdleVillagerSelectionSequence;
-        HouseSequenceText.Text = _settings.HouseBuildSequence;
-        MarketSequenceText.Text = _settings.MarketBuildSequence;
-        BlacksmithSequenceText.Text = _settings.BlacksmithBuildSequence;
-        FeudalUpgradeSequenceText.Text = _settings.FeudalUpgradeSequence;
-        CastleUpgradeSequenceText.Text = _settings.CastleUpgradeSequence;
         LlamaRuntimePathText.Text = _settings.LlamaRuntimePath;
         LlmModelPathText.Text = _settings.LlmModelPath;
         VisionProjectorPathText.Text = _settings.VisionProjectorPath;
@@ -276,20 +265,6 @@ public partial class DashboardWindow : Window
             EnableAutomationInput = AutomationInputCheck.IsChecked == true,
             AutomationStartHotKey = AutomationStartHotKeyText.Text.Trim(),
             AutomationStopHotKey = AutomationStopHotKeyText.Text.Trim(),
-            VillagerProductionSequence = VillagerSequenceText.Text.Trim(),
-            EnableMilitaryAutomation = MilitaryAutomationCheck.IsChecked == true,
-            BarracksProductionSequence = BarracksSequenceText.Text.Trim(),
-            ArcheryRangeProductionSequence = ArcheryRangeSequenceText.Text.Trim(),
-            StableProductionSequence = StableSequenceText.Text.Trim(),
-            IdleVillagerSelectionSequence = IdleVillagerSequenceText.Text.Trim(),
-            HouseBuildSequence = HouseSequenceText.Text.Trim(),
-            MarketBuildSequence = MarketSequenceText.Text.Trim(),
-            BlacksmithBuildSequence = BlacksmithSequenceText.Text.Trim(),
-            FeudalUpgradeSequence = FeudalUpgradeSequenceText.Text.Trim(),
-            CastleUpgradeSequence = CastleUpgradeSequenceText.Text.Trim(),
-            EconomyActionIntervalMilliseconds = _settings.EconomyActionIntervalMilliseconds,
-            MilitaryActionIntervalMilliseconds = _settings.MilitaryActionIntervalMilliseconds,
-            StrategicActionIntervalMilliseconds = _settings.StrategicActionIntervalMilliseconds,
             EnableLocalPlanning = _settings.EnableLocalPlanning,
             LlamaRuntimePath = LlamaRuntimePathText.Text.Trim(),
             LlmModelPath = LlmModelPathText.Text.Trim(),
@@ -335,7 +310,7 @@ public partial class DashboardWindow : Window
                     _settings.EnableLocalDiagnostics,
                     _settings.AutomationStartHotKey,
                     _settings.AutomationStopHotKey,
-                    _settings.EnableMilitaryAutomation,
+                    inputMode = "mouse-only",
                 },
                 liveDiagnostics = DiagnosticsText.Text,
                 sessions,

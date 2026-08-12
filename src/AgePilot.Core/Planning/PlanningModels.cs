@@ -52,15 +52,22 @@ public sealed record VisualObservation(
     string? PreviousAction,
     string? PreviousResult);
 
-public enum VisualToolKind { Observe, Wait, KeySequence, LeftClick, RightClick, Drag }
+public enum VisualToolKind { Observe, Wait, LeftClick, RightClick, Drag }
+
+public enum VisualCoordinateSpace { Panorama, Minimap, CommandGrid }
+
+public enum PreviousActionResult { NotApplicable, Confirmed, Failed, Uncertain }
 
 public sealed record VisualToolAction(
     VisualToolKind Tool,
-    IReadOnlyList<string> Keys,
+    VisualCoordinateSpace Space = VisualCoordinateSpace.Panorama,
+    string Target = "",
     double X = 0,
     double Y = 0,
     double EndX = 0,
-    double EndY = 0);
+    double EndY = 0,
+    int Row = 0,
+    int Column = 0);
 
 public sealed record VisualPlayerDecision(
     string Assessment,
@@ -69,7 +76,8 @@ public sealed record VisualPlayerDecision(
     VisualToolAction Action,
     string ExpectedResult,
     int RecheckAfterMs,
-    double Confidence);
+    double Confidence,
+    PreviousActionResult PreviousActionResult = PreviousActionResult.NotApplicable);
 
 public enum PlannedActionKind
 {

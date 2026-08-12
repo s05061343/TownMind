@@ -24,6 +24,14 @@ public sealed class HudProfile
 
     public NormalizedRect? MinimapRegion { get; init; }
 
+    public NormalizedRect? CommandPanelRegion { get; init; }
+
+    public NormalizedRect? CommandGridRegion { get; init; }
+
+    public int CommandGridRows { get; init; }
+
+    public int CommandGridColumns { get; init; }
+
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(Id))
@@ -54,5 +62,9 @@ public sealed class HudProfile
         AgeRegion?.Validate();
         PauseMenuRegion?.Validate();
         MinimapRegion?.Validate();
+        CommandPanelRegion?.Validate();
+        CommandGridRegion?.Validate();
+        if (CommandGridRegion is not null && (CommandGridRows <= 0 || CommandGridColumns <= 0))
+            throw new InvalidDataException("Command grid dimensions must be positive.");
     }
 }
