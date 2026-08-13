@@ -34,6 +34,24 @@
             <TextBlock Text="VLM 自動發展" Foreground="#C6A15B" FontSize="16" FontWeight="SemiBold"/>
             <TextBlock Text="VLM 每次決定一個經濟原子動作，送出後必須由下一張畫面確認。"
                        Foreground="#9FA695" TextWrapping="Wrap" Margin="0,6,0,10"/>
+            <TextBlock Text="長期策略：穩定發展經濟並升時代" Foreground="#C9C5BA"/>
+            <Grid Margin="0,6,0,10">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock Text="最終目標時代" Foreground="#9FA695" VerticalAlignment="Center"/>
+                <ComboBox x:Name="TargetAgeCombo" Grid.Column="1" Padding="6">
+                    <ComboBoxItem Content="封建時代" Tag="Feudal"/>
+                    <ComboBoxItem Content="城堡時代" Tag="Castle"/>
+                    <ComboBoxItem Content="帝王時代" Tag="Imperial"/>
+                </ComboBox>
+            </Grid>
+            <Border Background="#20241D" CornerRadius="6" Padding="10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Ellipse x:Name="MouseStatusDot" Width="10" Height="10" Fill="#D3A24C" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="MouseStatusText" Grid.Column="1" Text="滑鼠：本次啟動尚未測試" Foreground="#C9C5BA" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Button x:Name="TestMouseButton" Grid.Column="2" Content="測試滑鼠" Click="OnTestMouse" Padding="12,5" Margin="10,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+                </Grid>
+            </Border>
             <Border Background="#20241D" CornerRadius="6" Padding="10" Margin="0,0,0,10">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

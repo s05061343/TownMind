@@ -14,14 +14,31 @@ using AgePilot.Core;
 using AgePilot.Core.History;
 using AgePilot.Core.Observations;
 using AgePilot.Core.Planning;
+using AgePilot.Core.Automation;
 using AgePilot.Infrastructure.Planning;
 using System.Text.Json;
+
+var isGui = args.Length == 0 || args is ["overlay", _];
+Mutex? guiMutex = null;
+if (isGui)
+{
+    guiMutex = new Mutex(true, "Local\\AgePilot.SingleGuiInstance", out var isFirstInstance);
+    if (!isFirstInstance)
+    {
+        System.Windows.MessageBox.Show("AgePilot 已經在執行。請使用現有的系統匣圖示或先結束舊程序。", "AgePilot",
+            MessageBoxButton.OK, MessageBoxImage.Information);
+        guiMutex.Dispose();
+        return 3;
+    }
+}
 
 if (args.Length > 0)
 {
     ConsoleHost.AttachToParent();
 }
 
+try
+{
 return args switch
 {
     [] => RunDashboard(),
@@ -38,6 +55,11 @@ return args switch
     ["vlm-image", var imagePath] => await VlmImageAsync(imagePath),
     _ => ShowUsage(),
 };
+}
+finally
+{
+    guiMutex?.Dispose();
+}
 
 static int Inspect(string imagePath, string profilePath)
 {
@@ -145,16 +167,20 @@ static int RunOverlay(string profilePath)
     Exception? failure = null;
     var thread = new Thread(() =>
     {
+        var logger = LocalJsonLineLogger.CreateDefault();
         try
         {
             var application = new System.Windows.Application();
+            using var exceptions = GlobalExceptionMiddleware.Install(application, logger, "overlay");
             var settingsStore = JsonSettingsStore.CreateDefault();
             var settings = settingsStore.Load();
             settings.HudProfilePath = profilePath;
-            application.Run(new OverlayWindow(ResolveInputPath(profilePath), settings, sessionRepository: SqliteSessionRepository.CreateDefault(), logger: LocalJsonLineLogger.CreateDefault()));
+            application.Run(new OverlayWindow(ResolveInputPath(profilePath), settings, new MouseCapabilitySession(),
+                sessionRepository: SqliteSessionRepository.CreateDefault(), logger: logger));
         }
         catch (Exception exception)
         {
+            logger.WriteException("exception.gui_entry", exception, new { mode = "overlay" });
             failure = exception;
         }
     });
@@ -238,14 +264,20 @@ static int RunDashboard()
     Exception? failure = null;
     var thread = new Thread(() =>
     {
+        var logger = LocalJsonLineLogger.CreateDefault();
         try
         {
             var application = new System.Windows.Application();
+            using var exceptions = GlobalExceptionMiddleware.Install(application, logger, "dashboard");
             var dashboard = new DashboardWindow(JsonSettingsStore.CreateDefault());
             application.SessionEnding += (_, _) => dashboard.PrepareForSystemExit();
             application.Run(dashboard);
         }
-        catch (Exception exception) { failure = exception; }
+        catch (Exception exception)
+        {
+            logger.WriteException("exception.gui_entry", exception, new { mode = "dashboard" });
+            failure = exception;
+        }
     });
     thread.SetApartmentState(ApartmentState.STA);
     thread.Start();

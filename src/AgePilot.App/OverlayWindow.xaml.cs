@@ -31,6 +31,7 @@ public partial class OverlayWindow : Window
     private readonly LiveCoachService _coach;
     private readonly AutomationController _automation;
     private readonly AppSettings _settings;
+    private readonly LocalJsonLineLogger? _logger;
     private Task? _monitorTask;
     private nint _windowHandle;
     private bool _isClickThrough;
@@ -41,13 +42,15 @@ public partial class OverlayWindow : Window
     public OverlayWindow(
         string profilePath,
         AppSettings settings,
+        MouseCapabilitySession mouseCapability,
         ISessionRepository? sessionRepository = null,
         LocalJsonLineLogger? logger = null)
     {
         InitializeComponent();
         _settings = settings;
+        _logger = logger;
         _coach = new LiveCoachService(profilePath, settings, settings.ScanIntervalMilliseconds, sessionRepository, logger);
-        _automation = new AutomationController(settings, logger);
+        _automation = new AutomationController(settings, mouseCapability, logger);
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         Closed += OnClosed;
@@ -64,6 +67,15 @@ public partial class OverlayWindow : Window
             }
             catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
             {
+            }
+            catch (Exception exception)
+            {
+                _logger?.WriteException("exception.overlay_monitor", exception, new { source = "LiveCoachService.RunAsync" });
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    _automation.Disable($"監測工作失敗：{exception.Message}");
+                    UpdateAutomationUi();
+                });
             }
         });
     }
@@ -82,13 +94,16 @@ public partial class OverlayWindow : Window
 
         var advice = update.Recommendations.FirstOrDefault();
         _currentRecommendationId = advice?.Id;
-        AdviceTitle.Text = advice?.Title ?? update.Plan?.CurrentGoal ?? (update.IsConnected ? "規劃暫時不可用" : "等待遊戲連線");
-        AdviceDescription.Text = advice?.Description ?? update.Plan?.Reason ??
+        AdviceTitle.Text = update.Plan?.MinorDecision?.Objective ?? advice?.Title ?? update.Plan?.CurrentGoal ?? (update.IsConnected ? "規劃暫時不可用" : "等待遊戲連線");
+        AdviceDescription.Text = update.Plan?.MinorDecision?.Reason ?? advice?.Description ?? update.Plan?.Reason ??
             (update.IsConnected ? "沒有需要立即提醒的事項。" : "啟動 AOE2 並進入對局後會自動開始。 ");
         DismissButton.Visibility = advice is null ? Visibility.Collapsed : Visibility.Visible;
         OtherAdviceText.Text = update.Plan is not null
-            ? update.Plan.VisualDecision is { } visual
-                ? $"VLM：{visual.Assessment}\n操作：{Describe(visual.Action)} · 信心 {visual.Confidence:P0}\n預期：{visual.ExpectedResult}"
+            ? update.Plan.VisualDecision is { } visual && update.Plan.MajorDecision is { } major &&
+                update.Plan.MediumDecision is { } medium && update.Plan.MinorDecision is { } minor
+                ? $"長期：穩定發展經濟 → {_settings.TargetAge}\n大判斷：{major.Objective}\n中判斷：{medium.Objective}\n小判斷：{minor.Objective}\n操作：{Describe(visual.Action)} · 信心 {visual.Confidence:P0}\n預期：{visual.ExpectedResult}"
+                : update.Plan.VisualDecision is { } fallbackVisual
+                    ? $"VLM：{fallbackVisual.Assessment}\n操作：{Describe(fallbackVisual.Action)} · 信心 {fallbackVisual.Confidence:P0}\n預期：{fallbackVisual.ExpectedResult}"
                 : $"策略：{update.Plan.Strategy} · 目標：{update.Plan.CurrentGoal}{(update.Plan.ReusedAfterPlanningFailure ? "（沿用上一份有效計畫）" : string.Empty)}"
             : update.Recommendations.Count > 1
                 ? "其他：" + string.Join("、", update.Recommendations.Skip(1).Select(item => item.Title))
@@ -171,7 +186,11 @@ public partial class OverlayWindow : Window
             case HotKeyAutomationStart:
                 if (!_stopHotKeyRegistered) _automation.Disable("緊急停止熱鍵註冊失敗，禁止啟用");
                 else _automation.Enable();
-                if (_automation.IsEnabled) SetCompactMode(true);
+                if (_automation.IsEnabled)
+                {
+                    FocusGameWindow();
+                    SetCompactMode(true);
+                }
                 UpdateAutomationUi();
                 handled = true;
                 break;
@@ -194,16 +213,19 @@ public partial class OverlayWindow : Window
         { _automation.Disable("緊急停止熱鍵註冊失敗，禁止啟用"); UpdateAutomationUi(); return; }
         _automation.Toggle(requireDashboardPermission: false);
         SetCompactMode(_automation.IsEnabled);
-        if (_automation.IsEnabled) FocusGameWindow();
+        if (_automation.IsEnabled)
+        {
+            FocusGameWindow();
+        }
         UpdateAutomationUi();
     }
 
     private void SetCompactMode(bool compact)
     {
-        Height = compact ? 185 : _expandedHeight;
-        AdviceTitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        AdviceDescription.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        OtherAdviceText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        Height = _expandedHeight;
+        AdviceTitle.Visibility = Visibility.Visible;
+        AdviceDescription.Visibility = Visibility.Visible;
+        OtherAdviceText.Visibility = Visibility.Visible;
     }
 
     private void UpdateAutomationUi()

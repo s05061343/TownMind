@@ -87,10 +87,16 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             var action = new PlannedAction(PlannedActionKind.Reobserve, 80, dto.Reason,
                 RecheckSeconds: Math.Clamp((int)Math.Ceiling(dto.RecheckAfterMs / 1000d), 5, 30),
                 SuccessCondition: dto.ExpectedResult);
+            var major = ToDecision(dto.MajorDecision, DecisionLevel.Major);
+            var medium = ToDecision(dto.MediumDecision, DecisionLevel.Medium);
+            var minor = ToDecision(dto.MinorDecision, DecisionLevel.Minor);
             var plan = new GamePlan(Guid.NewGuid().ToString("N"), now, now.AddSeconds(60),
-                "visual-player", dto.Goal, dto.Reason, dto.Confidence,
-                [], [], [action], VisualDecision: decision);
+                context.Directive?.Strategy ?? "穩定發展經濟並升時代", minor.Objective, dto.Reason, dto.Confidence,
+                [], [], [action], VisualDecision: decision, MajorDecision: major, MediumDecision: medium, MinorDecision: minor,
+                RequestedUpdateScope: dto.RequestedUpdateScope);
             var validated = GamePlanValidator.Validate(plan, now);
+            if (validated.Success && context.PreviousPlan is { } previous && !FrozenParentsMatch(previous, plan, context.AllowedUpdateScope))
+                validated = new(null, "LLM 越級改寫已凍結的上層判斷");
             _logger?.Write("planning.completed", new { backend = _backend, latencyMs = started.ElapsedMilliseconds, validated = validated.Success, validated.Error });
             SetStatus(validated.Success ? PlannerRuntimePhase.Ready : PlannerRuntimePhase.Error,
                 validated.Success ? $"LLM 已就緒（{FormatBackend()}）" : $"計畫格式驗證失敗：{validated.Error}", FormatBackend());
@@ -307,6 +313,12 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private static object ToPromptContext(SituationContext context) => new
     {
         capturedAt = context.CapturedAt,
+        directive = context.Directive is null ? null : new
+        {
+            context.Directive.Strategy,
+            targetAge = context.Directive.TargetAge.ToString(),
+        },
+        allowedUpdateScope = context.AllowedUpdateScope.ToString(),
         state = new
         {
             age = context.State.Age?.ToString(),
@@ -315,7 +327,15 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         },
         history = context.History,
         map = context.Map?.IsUsable == true ? context.Map : null,
-        previousPlan = context.PreviousPlan is null ? null : new { context.PreviousPlan.Strategy, context.PreviousPlan.CurrentGoal },
+        previousPlan = context.PreviousPlan is null ? null : new
+        {
+            context.PreviousPlan.Revision,
+            context.PreviousPlan.Strategy,
+            context.PreviousPlan.CurrentGoal,
+            context.PreviousPlan.MajorDecision,
+            context.PreviousPlan.MediumDecision,
+            context.PreviousPlan.MinorDecision,
+        },
         events = context.RecentEvents,
         visual = context.Visual is null ? null : new
         {
@@ -331,6 +351,17 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private static object? Value(AgePilot.Core.Observations.ObservedValue<int>? value) => value?.IsUsable == true
         ? new { value.Value, value.Confidence, value.ObservedAt }
         : null;
+
+    private static DecisionNode ToDecision(DecisionDto dto, DecisionLevel level) => new(
+        dto.NodeId, level, dto.Objective, dto.Reason, dto.Evidence,
+        dto.CompletionCondition, dto.FailureCondition, dto.Status);
+
+    private static bool FrozenParentsMatch(GamePlan previous, GamePlan next, PlanUpdateScope scope) => scope switch
+    {
+        PlanUpdateScope.Major => true,
+        PlanUpdateScope.Medium => previous.MajorDecision == next.MajorDecision,
+        _ => previous.MajorDecision == next.MajorDecision && previous.MediumDecision == next.MediumDecision,
+    };
 
     private static string Resolve(string path)
     {
@@ -373,8 +404,25 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     private const string SystemPrompt = """
 /no_think
-你是謹慎的 AOE2 DE 經濟發展玩家。所有遊戲操作只能使用滑鼠，禁止快捷鍵與鍵盤輸入。panorama 是完整遊戲畫面；command_panel 是左下指令面板；minimap 是右下小地圖。每輪只輸出一個原子工具：Observe、Wait、LeftClick、RightClick 或 Drag。世界目標使用 Panorama normalized 座標；小地圖使用 Minimap 局部 normalized 座標；命令按鈕使用 CommandGrid 的 row 1..3、column 1..5，不得猜全畫面小圖示座標。每個輸入動作都必須用 target 簡述畫面上可見的目標證據。選取村民或建築後，下一輪必須從單位資訊與命令面板確認選取結果；未確認前只能 Observe 或 Wait。若 context 有 previousAction，先設定 previousActionResult；無法確認時必須 Uncertain 且不得提出新輸入。紅色建築預覽不可確認。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。不要輸出 Markdown，嚴格依 JSON schema 回覆。
+你是謹慎的 AOE2 DE 經濟發展玩家。玩家的 directive 是不可改寫的長期策略與最終目標時代。你必須維護 Major、Medium、Minor 三層判斷：Major 是目前升時代階段，Medium 是達成它的方法（例如生產村民、避免卡人口、依可見證據選羊、果樹、野生動物或其他食物來源），Minor 是現在要完成的具體小目標。allowedUpdateScope=Minor 時必須原樣保留 previousPlan 的 Major 與 Medium；Medium 時必須原樣保留 Major；只有 Major 才能重建三層。正常情況 requestedUpdateScope 必須等於 allowedUpdateScope；若畫面證明凍結的父層已失效，先保留它並把 requestedUpdateScope 提升到所需層級，程式會在下一輪授權重算。每個節點都要寫明畫面證據、完成條件與失敗條件。所有遊戲操作只能使用滑鼠，禁止快捷鍵與鍵盤輸入。panorama 是完整遊戲畫面；command_panel 是左下指令面板；minimap 是右下小地圖。每輪只輸出一個原子工具：Observe、Wait、LeftClick、RightClick 或 Drag。世界目標使用 Panorama normalized 座標；小地圖使用 Minimap 局部 normalized 座標；命令按鈕使用 CommandGrid 的 row 1..3、column 1..5，不得猜全畫面小圖示座標。每個輸入動作都必須用 target 簡述畫面上可見的目標證據。選取村民或建築後，下一輪必須從單位資訊與命令面板確認選取結果；未確認前只能 Observe 或 Wait。若 context 有 previousAction，先設定 previousActionResult；無法確認時必須 Uncertain 且不得提出新輸入。紅色建築預覽不可確認。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。不要輸出 Markdown，嚴格依 JSON schema 回覆。
 """;
+
+    private static object DecisionNodeSchema() => new Dictionary<string, object>
+    {
+        ["type"] = "object",
+        ["additionalProperties"] = false,
+        ["required"] = new[] { "nodeId", "objective", "reason", "evidence", "completionCondition", "failureCondition", "status" },
+        ["properties"] = new Dictionary<string, object>
+        {
+            ["nodeId"] = new { type = "string", maxLength = 80 },
+            ["objective"] = new { type = "string", maxLength = 200 },
+            ["reason"] = new { type = "string", maxLength = 300 },
+            ["evidence"] = new { type = "string", maxLength = 300 },
+            ["completionCondition"] = new { type = "string", maxLength = 300 },
+            ["failureCondition"] = new { type = "string", maxLength = 300 },
+            ["status"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<DecisionStatus>() },
+        },
+    };
 
     private static readonly object ResponseFormat = new
     {
@@ -387,7 +435,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             {
                 ["type"] = "object",
                 ["additionalProperties"] = false,
-                ["required"] = new[] { "assessment", "goal", "reason", "confidence", "action", "expectedResult", "recheckAfterMs", "previousActionResult" },
+                ["required"] = new[] { "assessment", "goal", "reason", "confidence", "requestedUpdateScope", "majorDecision", "mediumDecision", "minorDecision", "action", "expectedResult", "recheckAfterMs", "previousActionResult" },
                 ["properties"] = new Dictionary<string, object>
                 {
                     ["assessment"] = new { type = "string" },
@@ -397,6 +445,10 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     ["expectedResult"] = new { type = "string" },
                     ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
                     ["previousActionResult"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PreviousActionResult>() },
+                    ["requestedUpdateScope"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PlanUpdateScope>() },
+                    ["majorDecision"] = DecisionNodeSchema(),
+                    ["mediumDecision"] = DecisionNodeSchema(),
+                    ["minorDecision"] = DecisionNodeSchema(),
                     ["action"] = new Dictionary<string, object>
                     {
                         ["type"] = "object",
@@ -427,8 +479,11 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private sealed record CompletionEnvelope(IReadOnlyList<CompletionChoice> Choices);
     private sealed record CompletionChoice(CompletionMessage Message);
     private sealed record CompletionMessage(string Content);
-    private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence,
+    private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence, PlanUpdateScope RequestedUpdateScope,
+        DecisionDto MajorDecision, DecisionDto MediumDecision, DecisionDto MinorDecision,
         VisualActionDto Action, string ExpectedResult, int RecheckAfterMs, PreviousActionResult PreviousActionResult);
+    private sealed record DecisionDto(string NodeId, string Objective, string Reason, string Evidence,
+        string CompletionCondition, string FailureCondition, DecisionStatus Status);
     private sealed record VisualActionDto(VisualToolKind Tool, VisualCoordinateSpace Space, string? Target,
         double X, double Y, double EndX, double EndY, int Row, int Column);
 }

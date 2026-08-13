@@ -12,6 +12,7 @@ using AgePilot.Infrastructure.Diagnostics;
 using AgePilot.Infrastructure.Planning;
 using AgePilot.Core.Planning;
 using AgePilot.Core;
+using AgePilot.Core.Automation;
 using AgePilot.Core.History;
 using AgePilot.Vision.Images;
 using AgePilot.Vision.Geometry;
@@ -26,6 +27,7 @@ public partial class DashboardWindow : Window
     private readonly JsonSettingsStore _store;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly SqliteSessionRepository _sessions = SqliteSessionRepository.CreateDefault();
+    private readonly MouseCapabilitySession _mouseCapability = new();
     private AppSettings _settings;
     private OverlayWindow? _overlay;
     private readonly Forms.NotifyIcon _trayIcon;
@@ -88,6 +90,9 @@ public partial class DashboardWindow : Window
         LlamaRuntimePathText.Text = _settings.LlamaRuntimePath;
         LlmModelPathText.Text = _settings.LlmModelPath;
         VisionProjectorPathText.Text = _settings.VisionProjectorPath;
+        TargetAgeCombo.SelectedItem = TargetAgeCombo.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), _settings.TargetAge.ToString(), StringComparison.Ordinal));
+        if (TargetAgeCombo.SelectedIndex < 0) TargetAgeCombo.SelectedIndex = 1;
         SetLlmStatus(PlannerRuntimeStatus.NotConfigured("尚未測試；啟動 Overlay 後會自動載入"));
         ScanIntervalCombo.SelectedItem = ScanIntervalCombo.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(item => item.Content?.ToString() == _settings.ScanIntervalMilliseconds.ToString());
@@ -99,6 +104,27 @@ public partial class DashboardWindow : Window
         var game = new WindowsGameWindowLocator().Find();
         GameStatusText.Text = game is null ? "等待 AOE2 DE" : $"已連線：{game.Title}";
         GameStatusDot.Fill = new SolidColorBrush(game is null ? System.Windows.Media.Color.FromRgb(211, 162, 76) : System.Windows.Media.Color.FromRgb(127, 166, 106));
+        if (_mouseCapability.IsVerified && !_mouseCapability.IsValidFor(game?.Handle ?? nint.Zero))
+        {
+            MouseStatusText.Text = "滑鼠：AOE2 視窗已更換，請重新測試";
+            MouseStatusDot.Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(211, 162, 76));
+        }
+    }
+
+    private void OnTestMouse(object sender, RoutedEventArgs e)
+    {
+        TestMouseButton.IsEnabled = false;
+        try
+        {
+            var result = _mouseCapability.Run(new WindowsInputSender());
+            MouseStatusText.Text = $"滑鼠：{result.Status}";
+            MouseStatusDot.Fill = new SolidColorBrush(result.Success
+                ? System.Windows.Media.Color.FromRgb(127, 166, 106)
+                : System.Windows.Media.Color.FromRgb(190, 82, 72));
+            MessageText.Text = result.Status;
+            if (result.Success) Activate();
+        }
+        finally { TestMouseButton.IsEnabled = true; }
     }
 
     private void OnSaveSettings(object sender, RoutedEventArgs e)
@@ -199,6 +225,7 @@ public partial class DashboardWindow : Window
             _overlay = new OverlayWindow(
                 profilePath,
                 _settings,
+                _mouseCapability,
                 _settings.EnableSessionRecording ? SqliteSessionRepository.CreateDefault() : null,
                 _settings.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null)
             { Opacity = _settings.OverlayOpacity, Owner = this };
@@ -263,6 +290,8 @@ public partial class DashboardWindow : Window
             EnableSessionRecording = SessionRecordingCheck.IsChecked == true,
             EnableLocalDiagnostics = LocalDiagnosticsCheck.IsChecked == true,
             EnableAutomationInput = AutomationInputCheck.IsChecked == true,
+            TargetAge = Enum.TryParse<GameAge>((TargetAgeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(), out var targetAge)
+                ? targetAge : GameAge.Castle,
             AutomationStartHotKey = AutomationStartHotKeyText.Text.Trim(),
             AutomationStopHotKey = AutomationStopHotKeyText.Text.Trim(),
             EnableLocalPlanning = _settings.EnableLocalPlanning,

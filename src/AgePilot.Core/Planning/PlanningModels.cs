@@ -31,7 +31,33 @@ public sealed record GameHistorySummary(
     int? PopulationChange,
     TimeSpan Window);
 
-public sealed record PlanningEvent(string Kind, string Detail, DateTimeOffset At);
+public enum PlanUpdateScope { Minor, Medium, Major }
+
+public enum DecisionLevel { Major, Medium, Minor }
+
+public enum DecisionStatus { Active, Completed, Failed, Blocked }
+
+public sealed record DecisionNode(
+    string NodeId,
+    DecisionLevel Level,
+    string Objective,
+    string Reason,
+    string Evidence,
+    string CompletionCondition,
+    string FailureCondition,
+    DecisionStatus Status = DecisionStatus.Active);
+
+public sealed record StrategyDirective(
+    string Strategy,
+    GameAge TargetAge);
+
+public sealed record PlanningEvent(
+    string Kind,
+    string Detail,
+    DateTimeOffset At,
+    PlanUpdateScope Scope = PlanUpdateScope.Minor,
+    string? NodeId = null,
+    PreviousActionResult Result = PreviousActionResult.NotApplicable);
 
 public sealed record SituationContext(
     GameState State,
@@ -40,7 +66,9 @@ public sealed record SituationContext(
     GamePlan? PreviousPlan,
     IReadOnlyList<PlanningEvent> RecentEvents,
     DateTimeOffset CapturedAt,
-    VisualObservation? Visual = null);
+    VisualObservation? Visual = null,
+    StrategyDirective? Directive = null,
+    PlanUpdateScope AllowedUpdateScope = PlanUpdateScope.Major);
 
 public sealed record VisualImage(string Name, string MimeType, byte[] Data);
 
@@ -117,7 +145,12 @@ public sealed record GamePlan(
     IReadOnlyList<string> MissingInformation,
     IReadOnlyList<PlannedAction> Actions,
     bool ReusedAfterPlanningFailure = false,
-    VisualPlayerDecision? VisualDecision = null);
+    VisualPlayerDecision? VisualDecision = null,
+    int Revision = 1,
+    DecisionNode? MajorDecision = null,
+    DecisionNode? MediumDecision = null,
+    DecisionNode? MinorDecision = null,
+    PlanUpdateScope RequestedUpdateScope = PlanUpdateScope.Minor);
 
 public sealed record PlanningResult(GamePlan? Plan, string? Error = null)
 {

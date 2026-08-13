@@ -10,6 +10,8 @@ Portable 套件不包含約 5 GB 的 GGUF 模型或 llama.cpp runtime。第一�
 
 按「測試 LLM」後，狀態顯示「已就緒」才代表 backend、模型與圖片理解成功。自動操作預設為預演；只有使用者在 Overlay 明確啟用後才會送出遊戲輸入。
 
+Dashboard 可選擇最終目標時代（封建／城堡／帝王，預設城堡）。每次啟動 AgePilot 後還必須在 AOE2 已開啟時按「測試滑鼠」；游標會短暫移動並回到原位，全程不點擊。只有移動與恢復座標都經 Win32 讀回確認後，Overlay 才允許啟用自動操作。AOE2 視窗重開後必須重新測試。
+
 HIP 狀態必須顯示實際裝置，例如 `HIP / ROCm0`。若只載入 CPU backend，AgePilot 會拒絕啟動規劃；請確認 AMD ROCm 已安裝，且其 `bin` 目錄包含 `amdhip64_7.dll`。
 
 ## 第一次執行
@@ -44,7 +46,7 @@ Dashboard 可保存 HUD Profile、Overlay 透明度與掃描間隔，並直接�
 
 「儲存本機對局紀錄」可隨時關閉。診斷匯出只有按下「匯出診斷」並選定檔案後才會建立 JSON；內容不含 Screenshot、按鍵內容或帳號名稱。
 
-「儲存本機診斷事件」可控制 `%LocalAppData%\AgePilot\logs\agepilot.jsonl`。日誌只在生命週期、建議集合或辨識錯誤改變時寫入，單檔達 5 MB 後輪替一次；不保存 Screenshot。
+「儲存本機診斷事件」可控制 `%LocalAppData%\AgePilot\logs\agepilot.jsonl`。日誌包含 PID、執行緒、生命週期、規劃、自動操作與全域例外；單檔達 5 MB 後輪替一次，不保存 Screenshot。若主檔因權限或 I/O 問題無法寫入，改寫同目錄的 `agepilot-emergency.log`。
 
 ## 執行可攜版
 

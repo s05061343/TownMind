@@ -10,6 +10,7 @@ public sealed class AppSettings
     public bool EnableSessionRecording { get; set; } = true;
     public bool EnableLocalDiagnostics { get; set; } = true;
     public bool EnableAutomationInput { get; set; }
+    public GameAge TargetAge { get; set; } = GameAge.Castle;
     public string AutomationStartHotKey { get; set; } = "Ctrl+F10";
     public string AutomationStopHotKey { get; set; } = "Ctrl+F12";
     public bool EnableLocalPlanning { get; set; } = true;
@@ -33,6 +34,7 @@ public sealed class AppSettings
             throw new InvalidDataException("自動操作的啟用與停止熱鍵不可相同。");
         if (EnableLocalPlanning && (string.IsNullOrWhiteSpace(LlmModelPath) || string.IsNullOrWhiteSpace(VisionProjectorPath) || string.IsNullOrWhiteSpace(LlamaRuntimePath)))
             throw new InvalidDataException("本機規劃需要模型、mmproj 與 llama.cpp runtime 路徑。");
+        if (TargetAge == GameAge.Dark) throw new InvalidDataException("目標時代必須是封建、城堡或帝王時代。");
         if (LlmBackend is not ("auto" or "hip" or "vulkan"))
             throw new InvalidDataException("LLM backend 必須是 auto、hip 或 vulkan。");
         if (LlmPort is < 1024 or > 65535) throw new InvalidDataException("LLM port 必須介於 1024 與 65535。");

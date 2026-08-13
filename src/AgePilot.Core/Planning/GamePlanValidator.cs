@@ -17,6 +17,16 @@ public static class GamePlanValidator
         if (plan.ExpiresAt <= now || plan.ExpiresAt <= plan.CreatedAt || plan.ExpiresAt - plan.CreatedAt > TimeSpan.FromSeconds(60))
             return new(null, "規劃有效期限無效");
         if (plan.Actions is null || plan.Actions.Count == 0) return new(null, "規劃缺少動作");
+        var decisions = new[] { plan.MajorDecision, plan.MediumDecision, plan.MinorDecision };
+        if (decisions.Any(x => x is not null) && decisions.Any(x => x is null))
+            return new(null, "階層計畫必須同時包含大、中、小判斷");
+        if (plan.MajorDecision is not null)
+        {
+            if (plan.MajorDecision.Level != DecisionLevel.Major || plan.MediumDecision!.Level != DecisionLevel.Medium ||
+                plan.MinorDecision!.Level != DecisionLevel.Minor) return new(null, "階層計畫層級無效");
+            if (decisions.Select(x => x!.NodeId).Distinct(StringComparer.Ordinal).Count() != 3 ||
+                decisions.Any(x => !ValidDecision(x!))) return new(null, "階層計畫節點無效");
+        }
         if (plan.VisualDecision is { } decision)
         {
             if (decision.Confidence is < 0 or > 1 || decision.RecheckAfterMs is < 250 or > 30000 ||
@@ -50,6 +60,13 @@ public static class GamePlanValidator
         }
         return new(plan);
     }
+
+    private static bool ValidDecision(DecisionNode node) =>
+        !string.IsNullOrWhiteSpace(node.NodeId) && node.NodeId.Length <= 80 &&
+        node.NodeId.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') &&
+        !string.IsNullOrWhiteSpace(node.Objective) && !string.IsNullOrWhiteSpace(node.Reason) &&
+        !string.IsNullOrWhiteSpace(node.Evidence) && !string.IsNullOrWhiteSpace(node.CompletionCondition) &&
+        !string.IsNullOrWhiteSpace(node.FailureCondition);
 
     private static bool CoordinatesAreSafe(VisualToolAction action)
     {

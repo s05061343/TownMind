@@ -2,17 +2,28 @@ using AgePilot.Core.History;
 
 namespace AgePilot.Core.Planning;
 
-public sealed class StrategyEngine(IStrategicPlanner planner) : IDisposable
+public sealed class StrategyEngine : IDisposable
 {
+    private readonly IStrategicPlanner _planner;
+    private readonly StrategyDirective _directive;
     private GamePlan? _current;
     private Task<PlanningResult>? _pending;
-    private DateTimeOffset _lastAttempt = DateTimeOffset.MinValue;
+    private PlanUpdateScope? _pendingScope;
+    private PlanUpdateScope? _requestedScope = PlanUpdateScope.Major;
+    private PlanUpdateScope? _retryScope;
+    private DateTimeOffset _retryNotBefore = DateTimeOffset.MaxValue;
     private GameAge? _lastAge;
     private bool? _lastPopulationCapped;
     private MapArchetype _lastMap = MapArchetype.Unknown;
     private readonly Queue<PlanningEvent> _executionEvents = new();
 
-    public PlannerRuntimeStatus RuntimeStatus => planner is IPlannerRuntimeStatusSource source
+    public StrategyEngine(IStrategicPlanner planner, StrategyDirective? directive = null)
+    {
+        _planner = planner;
+        _directive = directive ?? new StrategyDirective("穩定發展經濟並升時代", GameAge.Castle);
+    }
+
+    public PlannerRuntimeStatus RuntimeStatus => _planner is IPlannerRuntimeStatusSource source
         ? source.RuntimeStatus
         : PlannerRuntimeStatus.NotConfigured("規劃器未提供 runtime 狀態");
 
@@ -24,26 +35,54 @@ public sealed class StrategyEngine(IStrategicPlanner planner) : IDisposable
         {
             var result = _pending.GetAwaiter().GetResult();
             _pending = null;
-            if (result.Success) _current = result.Plan;
-            else if (_current is not null) _current = _current with { ReusedAfterPlanningFailure = true };
+            if (result.Success)
+            {
+                var completedScope = _pendingScope ?? PlanUpdateScope.Major;
+                _current = Merge(_current, result.Plan!, completedScope);
+                if ((int)result.Plan!.RequestedUpdateScope > (int)completedScope)
+                    Request(result.Plan.RequestedUpdateScope);
+                _retryScope = null;
+                _retryNotBefore = DateTimeOffset.MaxValue;
+            }
+            else
+            {
+                if (_current is not null) _current = _current with { ReusedAfterPlanningFailure = true };
+                _retryScope = _pendingScope ?? PlanUpdateScope.Minor;
+                _retryNotBefore = now.AddSeconds(10);
+            }
+            _pendingScope = null;
         }
 
         var populationCapped = state.Population?.IsUsable == true && state.PopulationCap?.IsUsable == true &&
                                state.Population.Value >= state.PopulationCap.Value;
-        var changed = state.Age != _lastAge || populationCapped != _lastPopulationCapped ||
-                      (map?.IsUsable == true && map.Archetype != _lastMap);
+        var ageChanged = state.Age != _lastAge;
+        var populationChanged = populationCapped != _lastPopulationCapped;
+        var mapChanged = map?.IsUsable == true && map.Archetype != _lastMap;
         _lastAge = state.Age; _lastPopulationCapped = populationCapped;
         if (map?.IsUsable == true) _lastMap = map.Archetype;
 
-        if (_pending is null && (changed || now - _lastAttempt >= TimeSpan.FromSeconds(20)))
+        if (ageChanged) Request(PlanUpdateScope.Major);
+        else if (mapChanged) Request(PlanUpdateScope.Medium);
+        else if (populationChanged) Request(PlanUpdateScope.Minor);
+        if (_pending is null && _retryScope is { } retryScope && now >= _retryNotBefore)
         {
-            _lastAttempt = now;
+            _retryScope = null;
+            Request(retryScope);
+        }
+        if (_pending is null && _retryScope is null && _current is not null && _current.ExpiresAt <= now) Request(PlanUpdateScope.Minor);
+
+        if (_pending is null && _requestedScope is { } scope)
+        {
+            _requestedScope = null;
+            _pendingScope = scope;
             var events = _executionEvents.ToList();
             _executionEvents.Clear();
-            if (changed) events.Add(new PlanningEvent("state_changed", "時代、人口或地圖狀態改變", now));
+            if (ageChanged) events.Add(new PlanningEvent("age_changed", "時代改變", now, PlanUpdateScope.Major));
+            else if (mapChanged) events.Add(new PlanningEvent("map_changed", "可用地形判斷改變", now, PlanUpdateScope.Medium));
+            else if (populationChanged) events.Add(new PlanningEvent("population_gate_changed", "人口上限狀態改變", now));
             var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
-                map?.IsUsable == true ? map : null, _current, events, now, visual);
-            _pending = planner.PlanAsync(context, cancellationToken);
+                map?.IsUsable == true ? map : null, _current, events, now, visual, _directive, scope);
+            _pending = _planner.PlanAsync(context, cancellationToken);
         }
 
         var current = Current(now);
@@ -55,18 +94,34 @@ public sealed class StrategyEngine(IStrategicPlanner planner) : IDisposable
     public void ReportExecutionEvent(PlanningEvent executionEvent)
     {
         _executionEvents.Enqueue(executionEvent);
-        _current = null;
-        _lastAttempt = DateTimeOffset.MinValue;
+        if (executionEvent.Kind is not "visual_action_sent") Request(executionEvent.Scope);
     }
 
     private GamePlan? Current(DateTimeOffset now)
     {
-        if (_current is null || _current.ExpiresAt <= now) _current = null;
         return _current;
+    }
+
+    private void Request(PlanUpdateScope scope)
+    {
+        if (_requestedScope is null || (int)scope > (int)_requestedScope.Value) _requestedScope = scope;
+    }
+
+    private static GamePlan Merge(GamePlan? previous, GamePlan next, PlanUpdateScope scope)
+    {
+        if (previous is null || scope == PlanUpdateScope.Major) return next;
+        return scope == PlanUpdateScope.Medium
+            ? next with { MajorDecision = previous.MajorDecision, Revision = previous.Revision + 1 }
+            : next with
+            {
+                MajorDecision = previous.MajorDecision,
+                MediumDecision = previous.MediumDecision,
+                Revision = previous.Revision + 1,
+            };
     }
 
     public void Dispose()
     {
-        if (planner is IDisposable disposable) disposable.Dispose();
+        if (_planner is IDisposable disposable) disposable.Dispose();
     }
 }

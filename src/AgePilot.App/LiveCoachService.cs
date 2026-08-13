@@ -29,7 +29,8 @@ public sealed class LiveCoachService(
     private readonly PaddleNumericOcrEngine _ocr = new();
     private readonly TemporalGameStateEstimator _estimator = new();
     private readonly GameHistory _history = new();
-    private readonly StrategyEngine _strategy = new(new LlamaServerPlanner(settings, logger));
+    private readonly StrategyEngine _strategy = new(new LlamaServerPlanner(settings, logger),
+        new StrategyDirective("穩定發展經濟並升至玩家指定時代", settings.TargetAge));
     private readonly RecommendationCoordinator _recommendationCoordinator = new();
     private readonly GameLifecycleTracker _lifecycle = new();
     private readonly MinimapAnalyzer _minimapAnalyzer = new();
@@ -221,8 +222,15 @@ public sealed class LiveCoachService(
 
     public void ReportExecutionEvent(PlanningEvent executionEvent)
     {
-        _previousVisualAction = executionEvent.Detail;
-        _previousVisualResult = executionEvent.Kind;
+        if (executionEvent.Kind == "visual_action_sent")
+        {
+            _previousVisualAction = executionEvent.Detail;
+            _previousVisualResult = null;
+        }
+        else if (executionEvent.Kind is not ("visual_action_recheck_due" or "visual_wait_elapsed"))
+        {
+            _previousVisualResult = executionEvent.Kind;
+        }
         _strategy.ReportExecutionEvent(executionEvent);
     }
 }

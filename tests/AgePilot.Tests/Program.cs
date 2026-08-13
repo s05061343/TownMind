@@ -48,12 +48,15 @@ var tests = new (string Name, Action Run)[]
     ("Unavailable observation is not usable", UnavailableObservationIsNotUsable),
     ("Settings round trip", SettingsRoundTrip),
     ("Local diagnostic log is JSON lines", LocalDiagnosticLogIsJsonLines),
+    ("Local diagnostic exceptions include stack context", LocalDiagnosticExceptionIncludesContext),
     ("SQLite session round trip", SqliteSessionRoundTrip),
     ("Brand assets include Windows icon sizes", BrandAssetsIncludeWindowsIconSizes),
     ("Application hotkeys are parsed", AutomationInputsAreParsed),
     ("Automation settings reject conflicting hotkeys", AutomationSettingsRejectConflictingHotkeys),
     ("Game plan validator rejects unsafe conditions", GamePlanValidatorRejectsUnsafeConditions),
-    ("Strategy engine reuses then expires previous plan", StrategyEngineReusesThenExpiresPlan),
+    ("Strategy engine replans only the affected hierarchy", StrategyEngineReplansAffectedHierarchy),
+    ("Mouse probe verifies movement and restores cursor", MouseProbeVerifiesAndRestores),
+    ("Mouse probe fails when cursor does not move", MouseProbeRejectsMissingMovement),
     ("Minimap requires temporal confirmation", MinimapRequiresTemporalConfirmation),
     ("GPU device parser rejects CPU fallback", GpuDeviceParserRejectsCpuFallback),
     ("Quantified plan becomes concrete recommendation", QuantifiedPlanBecomesConcreteRecommendation),
@@ -398,6 +401,7 @@ static void SettingsRoundTrip()
             EnableLocalDiagnostics = false,
             AutomationStartHotKey = "Alt+F10",
             AutomationStopHotKey = "Alt+F12",
+            TargetAge = GameAge.Imperial,
             LlamaRuntimePath = @"D:\runtime\llama.cpp",
             LlmModelPath = @"D:\models\qwen.gguf",
         });
@@ -409,6 +413,7 @@ static void SettingsRoundTrip()
         Equal(false, loaded.EnableLocalDiagnostics);
         Equal("Alt+F10", loaded.AutomationStartHotKey);
         Equal("Alt+F12", loaded.AutomationStopHotKey);
+        Equal(GameAge.Imperial, loaded.TargetAge);
         Equal(@"D:\runtime\llama.cpp", loaded.LlamaRuntimePath);
         Equal(@"D:\models\qwen.gguf", loaded.LlmModelPath);
     }
@@ -426,6 +431,25 @@ static void LocalDiagnosticLogIsJsonLines()
         using var json = JsonDocument.Parse(File.ReadAllLines(path).Single());
         Equal("game.lifecycle", json.RootElement.GetProperty("eventName").GetString());
         Equal("GameActive", json.RootElement.GetProperty("data").GetProperty("state").GetString());
+    }
+    finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+}
+
+static void LocalDiagnosticExceptionIncludesContext()
+{
+    var directory = Path.Combine(Path.GetTempPath(), $"agepilot-exception-log-{Guid.NewGuid():N}");
+    var path = Path.Combine(directory, "agepilot.jsonl");
+    try
+    {
+        var logger = new LocalJsonLineLogger(path);
+        logger.WriteException("exception.test", new InvalidOperationException("diagnostic-test"), new { source = "test" });
+        using var json = JsonDocument.Parse(File.ReadAllLines(path).Single());
+        Equal("exception.test", json.RootElement.GetProperty("eventName").GetString());
+        Equal(Environment.ProcessId, json.RootElement.GetProperty("processId").GetInt32());
+        var data = json.RootElement.GetProperty("data");
+        Equal("System.InvalidOperationException", data.GetProperty("exceptionType").GetString());
+        Equal("diagnostic-test", data.GetProperty("Message").GetString());
+        Equal("test", data.GetProperty("context").GetProperty("source").GetString());
     }
     finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 }
@@ -546,20 +570,64 @@ static void GamePlanValidatorRejectsUnsafeConditions()
     Equal(false, GamePlanValidator.Validate(unsafePlan, now).Success);
 }
 
-static void StrategyEngineReusesThenExpiresPlan()
+static void StrategyEngineReplansAffectedHierarchy()
 {
     var now = DateTimeOffset.UtcNow;
-    var first = new GamePlan("p1", now, now.AddSeconds(60), "economy", "補人口", "維持生產", 0.9,
-        [], [], [new PlannedAction(PlannedActionKind.QueueVillager, 80, "維持生產")]);
-    using var engine = new StrategyEngine(new SequencePlanner([new(first), new(null, "timeout")]));
+    var first = HierarchyPlan("p1", now, "major-1", "medium-1", "minor-1");
+    var minorUpdate = HierarchyPlan("p2", now.AddSeconds(10), "major-illegal", "medium-illegal", "minor-2");
+    var mediumUpdate = HierarchyPlan("p3", now.AddSeconds(20), "major-illegal-2", "medium-2", "minor-3");
+    var planner = new SequencePlanner([new(first), new(minorUpdate), new(mediumUpdate)]);
+    using var engine = new StrategyEngine(planner);
     var state = new GameState { Food = Confirmed(100, now), Population = Confirmed(4, now), PopulationCap = Confirmed(5, now) };
     var history = new GameHistory(); history.Add(state, now);
     _ = engine.UpdateAsync(state, history, null, now, CancellationToken.None).GetAwaiter().GetResult();
     Equal("p1", engine.UpdateAsync(state, history, null, now, CancellationToken.None).GetAwaiter().GetResult().Plan?.PlanId);
-    var changed = new GameState { Age = GameAge.Feudal, Food = Confirmed(100, now), Population = Confirmed(4, now), PopulationCap = Confirmed(5, now) };
-    _ = engine.UpdateAsync(changed, history, null, now.AddSeconds(1), CancellationToken.None).GetAwaiter().GetResult();
-    Equal(true, engine.UpdateAsync(changed, history, null, now.AddSeconds(1), CancellationToken.None).GetAwaiter().GetResult().Plan?.ReusedAfterPlanningFailure == true);
-    Equal<GamePlan?>(null, engine.UpdateAsync(changed, history, null, now.AddSeconds(61), CancellationToken.None).GetAwaiter().GetResult().Plan);
+    _ = engine.UpdateAsync(state, history, null, now.AddSeconds(5), CancellationToken.None).GetAwaiter().GetResult();
+    Equal(1, planner.Contexts.Count);
+
+    engine.ReportExecutionEvent(new PlanningEvent("visual_action_confirmed", "完成小動作", now.AddSeconds(10), PlanUpdateScope.Minor));
+    _ = engine.UpdateAsync(state, history, null, now.AddSeconds(10), CancellationToken.None).GetAwaiter().GetResult();
+    var afterMinor = engine.UpdateAsync(state, history, null, now.AddSeconds(10), CancellationToken.None).GetAwaiter().GetResult().Plan!;
+    Equal("major-1", afterMinor.MajorDecision?.NodeId);
+    Equal("medium-1", afterMinor.MediumDecision?.NodeId);
+    Equal("minor-2", afterMinor.MinorDecision?.NodeId);
+
+    engine.ReportExecutionEvent(new PlanningEvent("food_source_invalid", "羊已耗盡", now.AddSeconds(20), PlanUpdateScope.Medium));
+    _ = engine.UpdateAsync(state, history, null, now.AddSeconds(20), CancellationToken.None).GetAwaiter().GetResult();
+    var afterMedium = engine.UpdateAsync(state, history, null, now.AddSeconds(20), CancellationToken.None).GetAwaiter().GetResult().Plan!;
+    Equal("major-1", afterMedium.MajorDecision?.NodeId);
+    Equal("medium-2", afterMedium.MediumDecision?.NodeId);
+    Equal(3, planner.Contexts.Count);
+    Equal(PlanUpdateScope.Minor, planner.Contexts[1].AllowedUpdateScope);
+    Equal(PlanUpdateScope.Medium, planner.Contexts[2].AllowedUpdateScope);
+}
+
+static GamePlan HierarchyPlan(string id, DateTimeOffset now, string majorId, string mediumId, string minorId) =>
+    new(id, now, now.AddSeconds(60), "穩定發展經濟並升時代", "執行小判斷", "測試", 0.9, [], [],
+        [new PlannedAction(PlannedActionKind.Reobserve, 80, "測試")],
+        MajorDecision: Node(majorId, DecisionLevel.Major), MediumDecision: Node(mediumId, DecisionLevel.Medium),
+        MinorDecision: Node(minorId, DecisionLevel.Minor));
+
+static DecisionNode Node(string id, DecisionLevel level) =>
+    new(id, level, $"{level} 目標", "理由", "可信畫面證據", "完成條件", "失敗條件");
+
+static void MouseProbeVerifiesAndRestores()
+{
+    var backend = new FakeMouseBackend(new MousePoint(10, 20), new MousePoint(40, 20));
+    var capability = new MouseCapabilitySession();
+    var result = capability.Run(backend);
+    Equal(true, result.Success);
+    Equal(new MousePoint(10, 20), backend.Cursor);
+    Equal(true, capability.IsValidFor(new nint(42)));
+    Equal(2, backend.MoveCount);
+}
+
+static void MouseProbeRejectsMissingMovement()
+{
+    var backend = new FakeMouseBackend(new MousePoint(10, 20), new MousePoint(40, 20)) { IgnoreMovement = true };
+    var capability = new MouseCapabilitySession();
+    Equal(false, capability.Run(backend).Success);
+    Equal(false, capability.IsVerified);
 }
 
 static void MinimapRequiresTemporalConfirmation()
@@ -691,6 +759,23 @@ static void Throws<TException>(Action action)
 sealed class SequencePlanner(IEnumerable<PlanningResult> results) : IStrategicPlanner
 {
     private readonly Queue<PlanningResult> _results = new(results);
-    public Task<PlanningResult> PlanAsync(SituationContext context, CancellationToken cancellationToken) =>
-        Task.FromResult(_results.Count == 0 ? new PlanningResult(null, "empty") : _results.Dequeue());
+    public List<SituationContext> Contexts { get; } = [];
+    public Task<PlanningResult> PlanAsync(SituationContext context, CancellationToken cancellationToken)
+    {
+        Contexts.Add(context);
+        return Task.FromResult(_results.Count == 0 ? new PlanningResult(null, "empty") : _results.Dequeue());
+    }
+}
+
+sealed class FakeMouseBackend(MousePoint cursor, MousePoint target) : IMouseProbeBackend
+{
+    public nint CurrentGameWindowHandle => new(42);
+    public MousePoint Cursor { get; private set; } = cursor;
+    public int MoveCount { get; private set; }
+    public bool IgnoreMovement { get; set; }
+    public bool TryGetCursor(out MousePoint point, out string status) { point = Cursor; status = "ok"; return true; }
+    public bool TryPrepareProbe(MousePoint original, out nint windowHandle, out MousePoint prepared, out string status)
+    { windowHandle = CurrentGameWindowHandle; prepared = target; status = "ok"; return true; }
+    public bool TrySetCursor(MousePoint point, out string status)
+    { MoveCount++; if (!IgnoreMovement) Cursor = point; status = "ok"; return true; }
 }
