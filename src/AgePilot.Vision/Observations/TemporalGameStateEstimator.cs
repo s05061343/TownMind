@@ -11,6 +11,7 @@ public sealed class TemporalGameStateEstimator(
     double temporalCandidateConfidence = 0.45)
 {
     private readonly Dictionary<HudField, Queue<(int Value, double Confidence)>> _windows = new();
+    private readonly Queue<(PopulationValue Value, double Confidence)> _populationWindow = new();
 
     public GameState Update(HudOcrResult result, DateTimeOffset observedAt)
     {
@@ -22,10 +23,7 @@ public sealed class TemporalGameStateEstimator(
 
         var populationConfidence = result.Fields[HudField.Population].Confidence;
         var population = result.Population;
-        var populationValue = UpdateField(HudField.Population, population?.Current, populationConfidence, observedAt);
-        var capValue = population is null || populationConfidence < minimumConfidence
-            ? ObservedValue<int>.Unavailable(observedAt)
-            : new ObservedValue<int>(population.Value.Cap, populationConfidence, observedAt, ObservationStatus.Confirmed);
+        var (populationValue, capValue) = UpdatePopulation(population, populationConfidence, observedAt);
 
         return new GameState
         {
@@ -37,6 +35,33 @@ public sealed class TemporalGameStateEstimator(
             Population = populationValue,
             PopulationCap = capValue,
         };
+    }
+
+    private (ObservedValue<int> Current, ObservedValue<int> Cap) UpdatePopulation(
+        PopulationValue? rawValue,
+        double confidence,
+        DateTimeOffset observedAt)
+    {
+        if (rawValue is null || confidence < temporalCandidateConfidence)
+        {
+            _populationWindow.Clear();
+            return (ObservedValue<int>.Unavailable(observedAt), ObservedValue<int>.Unavailable(observedAt));
+        }
+
+        _populationWindow.Enqueue((rawValue.Value, confidence));
+        while (_populationWindow.Count > windowSize) _populationWindow.Dequeue();
+
+        var confirmed = confidence >= minimumConfidence ||
+                        _populationWindow.Count >= 2 &&
+                        _populationWindow.Reverse().Take(2).All(item => item.Value == rawValue.Value);
+        if (!confirmed)
+            return (ObservedValue<int>.Unavailable(observedAt), ObservedValue<int>.Unavailable(observedAt));
+
+        var matching = _populationWindow.Where(item => item.Value == rawValue.Value).ToArray();
+        var aggregateConfidence = matching.Average(item => item.Confidence);
+        return (
+            new ObservedValue<int>(rawValue.Value.Current, aggregateConfidence, observedAt, ObservationStatus.Confirmed),
+            new ObservedValue<int>(rawValue.Value.Cap, aggregateConfidence, observedAt, ObservationStatus.Confirmed));
     }
 
     private ObservedValue<int> UpdateField(

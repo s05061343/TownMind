@@ -12,6 +12,8 @@ public enum ProcedureStepKind
     /// 保留作為後備：若 Phase 2 遇到沒有快捷鍵的指令仍可走這條路徑。
     /// </summary>
     CommandGridClick,
+    /// <summary>點擊相對遊戲視窗的固定 normalized 世界位置。</summary>
+    WorldClick,
     /// <summary>等待遊戲完成 UI 轉場，例如選取後面板重繪。</summary>
     Delay,
 }
@@ -21,7 +23,9 @@ public sealed record ProcedureStep(
     IReadOnlyList<GameKeyChord>? Keys = null,
     int Row = 0,
     int Column = 0,
-    int DelayMs = 0);
+    int DelayMs = 0,
+    double X = 0,
+    double Y = 0);
 
 public sealed record GameActionProcedure(
     GameActionKind Kind,
@@ -41,6 +45,11 @@ public sealed record GameActionProcedure(
 public static class GameActionRegistry
 {
     private const int UiSettleMs = 180;
+    private static readonly (double X, double Y)[] HousePlacementCandidates =
+    [
+        (0.58, 0.54), (0.42, 0.54), (0.58, 0.42),
+        (0.42, 0.42), (0.50, 0.62), (0.50, 0.38),
+    ];
 
     public static bool TryResolve(
         GameActionKind kind,
@@ -48,7 +57,8 @@ public static class GameActionRegistry
         GameState? state,
         GameAge? currentAge,
         out GameActionProcedure procedure,
-        out string blockedReason)
+        out string blockedReason,
+        int housePlacementIndex = 0)
     {
         procedure = null!;
         blockedReason = "";
@@ -62,22 +72,24 @@ public static class GameActionRegistry
                 return true;
 
             case GameActionKind.QueueVillager:
+                if (state?.Population?.IsUsable != true || state.PopulationCap?.IsUsable != true)
+                { blockedReason = "OCR 無法可靠讀取人口，不送出生產村民動作"; return false; }
+                var remainingPopulation = state.PopulationCap.Value.GetValueOrDefault() - state.Population.Value.GetValueOrDefault();
+                if (remainingPopulation <= 2)
+                { blockedReason = $"人口剩餘空間只有 {remainingPopulation}，必須先建造房屋"; return false; }
                 return TryTownCenterKeyboard(kind, bindings, state, "queueVillager",
                     [new(TrackedResource.Food, 50)], "生產村民", out procedure, out blockedReason);
 
             case GameActionKind.AdvanceAge:
-                if (currentAge is null)
-                { blockedReason = "無法確認目前時代，不送出升時代動作"; return false; }
-                var costs = AdvanceAgeCosts(currentAge.Value);
-                if (costs.Count == 0)
-                { blockedReason = $"{currentAge.Value} 沒有可升的下一個時代"; return false; }
-                return TryTownCenterKeyboard(kind, bindings, state, "advanceAge",
-                    costs, $"升時代（自 {currentAge.Value}）", out procedure, out blockedReason);
+                blockedReason = "本階段只驗證村民生產與房屋閉環，升時代尚未開放";
+                return false;
+
+            case GameActionKind.BuildHouse:
+                return TryBuildHouse(bindings, state, housePlacementIndex, out procedure, out blockedReason);
 
             case GameActionKind.GatherFood:
             case GameActionKind.GatherWood:
             case GameActionKind.GatherGold:
-            case GameActionKind.BuildHouse:
                 blockedReason = $"{kind} 需要世界座標接地，屬 ADR 0015 Phase 2，尚未實作";
                 return false;
 
@@ -85,6 +97,42 @@ public static class GameActionRegistry
                 blockedReason = $"未知的動作：{kind}";
                 return false;
         }
+    }
+
+    private static bool TryBuildHouse(
+        GameHotKeyBindings bindings,
+        GameState? state,
+        int placementIndex,
+        out GameActionProcedure procedure,
+        out string blockedReason)
+    {
+        procedure = null!;
+        if (!bindings.TryGetKeys("selectIdleVillager", out var idle, out blockedReason)) return false;
+        if (!bindings.TryGetKeys("openEconomicBuildings", out var economic, out blockedReason)) return false;
+        if (!bindings.TryGetKeys("buildHouse", out var house, out blockedReason)) return false;
+        if (!HasAffordableResources(state, [new(TrackedResource.Wood, 25)], out blockedReason)) return false;
+        if (state?.Population?.IsUsable != true || state.PopulationCap?.IsUsable != true)
+        { blockedReason = "OCR 無法可靠讀取人口，不送出建造房屋動作"; return false; }
+        var remaining = state.PopulationCap.Value.GetValueOrDefault() - state.Population.Value.GetValueOrDefault();
+        if (remaining > 2)
+        { blockedReason = $"人口空間仍有 {remaining}，暫不建造房屋"; return false; }
+
+        var candidate = HousePlacementCandidates[Math.Abs(placementIndex) % HousePlacementCandidates.Length];
+        procedure = new(GameActionKind.BuildHouse,
+            [
+                new(ProcedureStepKind.GameKey, Keys: idle),
+                new(ProcedureStepKind.Delay, DelayMs: UiSettleMs),
+                new(ProcedureStepKind.GameKey, Keys: economic),
+                new(ProcedureStepKind.Delay, DelayMs: UiSettleMs),
+                new(ProcedureStepKind.GameKey, Keys: house),
+                new(ProcedureStepKind.Delay, DelayMs: UiSettleMs),
+                new(ProcedureStepKind.WorldClick, X: candidate.X, Y: candidate.Y),
+            ],
+            new(PostconditionKind.PopulationCapIncrease), TimeSpan.FromSeconds(90),
+            $"建造房屋（候選 {placementIndex % HousePlacementCandidates.Length + 1}）",
+            [new(TrackedResource.Wood, 25)]);
+        blockedReason = "";
+        return true;
     }
 
     /// <summary>

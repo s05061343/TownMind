@@ -6,6 +6,7 @@ public sealed class StrategyEngine : IDisposable
 {
     private readonly IStrategicPlanner _planner;
     private readonly StrategyDirective _directive;
+    private readonly bool _ownsPlanner;
     private GamePlan? _current;
     private Task<PlanningResult>? _pending;
     private PlanUpdateScope? _pendingScope;
@@ -13,14 +14,15 @@ public sealed class StrategyEngine : IDisposable
     private PlanUpdateScope? _retryScope;
     private DateTimeOffset _retryNotBefore = DateTimeOffset.MaxValue;
     private GameAge? _lastAge;
-    private bool? _lastPopulationCapped;
+    private PopulationPressure? _lastPopulationPressure;
     private MapArchetype _lastMap = MapArchetype.Unknown;
     private readonly Queue<PlanningEvent> _executionEvents = new();
 
-    public StrategyEngine(IStrategicPlanner planner, StrategyDirective? directive = null)
+    public StrategyEngine(IStrategicPlanner planner, StrategyDirective? directive = null, bool ownsPlanner = true)
     {
         _planner = planner;
         _directive = directive ?? new StrategyDirective("穩定發展經濟並升時代", GameAge.Castle);
+        _ownsPlanner = ownsPlanner;
     }
 
     public PlannerRuntimeStatus RuntimeStatus => _planner is IPlannerRuntimeStatusSource source
@@ -53,12 +55,11 @@ public sealed class StrategyEngine : IDisposable
             _pendingScope = null;
         }
 
-        var populationCapped = state.Population?.IsUsable == true && state.PopulationCap?.IsUsable == true &&
-                               state.Population.Value >= state.PopulationCap.Value;
+        var populationPressure = GetPopulationPressure(state);
         var ageChanged = state.Age != _lastAge;
-        var populationChanged = populationCapped != _lastPopulationCapped;
+        var populationChanged = populationPressure != _lastPopulationPressure;
         var mapChanged = map?.IsUsable == true && map.Archetype != _lastMap;
-        _lastAge = state.Age; _lastPopulationCapped = populationCapped;
+        _lastAge = state.Age; _lastPopulationPressure = populationPressure;
         if (map?.IsUsable == true) _lastMap = map.Archetype;
 
         if (ageChanged) Request(PlanUpdateScope.Major);
@@ -79,7 +80,8 @@ public sealed class StrategyEngine : IDisposable
             _executionEvents.Clear();
             if (ageChanged) events.Add(new PlanningEvent("age_changed", "時代改變", now, PlanUpdateScope.Major));
             else if (mapChanged) events.Add(new PlanningEvent("map_changed", "可用地形判斷改變", now, PlanUpdateScope.Medium));
-            else if (populationChanged) events.Add(new PlanningEvent("population_gate_changed", "人口上限狀態改變", now));
+            else if (populationChanged) events.Add(new PlanningEvent("population_gate_changed",
+                $"人口壓力狀態改變為 {populationPressure}", now));
             var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
                 map?.IsUsable == true ? map : null, _current, events, now, visual, _directive, scope);
             _pending = _planner.PlanAsync(context, cancellationToken);
@@ -108,6 +110,15 @@ public sealed class StrategyEngine : IDisposable
         if (_requestedScope is null || (int)scope > (int)_requestedScope.Value) _requestedScope = scope;
     }
 
+    private static PopulationPressure GetPopulationPressure(GameState state)
+    {
+        if (state.Population?.IsUsable != true || state.PopulationCap?.IsUsable != true)
+            return PopulationPressure.Unknown;
+        return state.PopulationCap.Value.GetValueOrDefault() - state.Population.Value.GetValueOrDefault() <= 2
+            ? PopulationPressure.HouseRequired
+            : PopulationPressure.Safe;
+    }
+
     private static GamePlan Merge(GamePlan? previous, GamePlan next, PlanUpdateScope scope)
     {
         if (previous is null || scope == PlanUpdateScope.Major) return next;
@@ -123,6 +134,8 @@ public sealed class StrategyEngine : IDisposable
 
     public void Dispose()
     {
-        if (_planner is IDisposable disposable) disposable.Dispose();
+        if (_ownsPlanner && _planner is IDisposable disposable) disposable.Dispose();
     }
+
+    private enum PopulationPressure { Unknown, Safe, HouseRequired }
 }

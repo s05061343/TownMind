@@ -17,6 +17,7 @@ using AgePilot.Core.History;
 using AgePilot.Vision.Images;
 using AgePilot.Vision.Geometry;
 using System.ComponentModel;
+using System.Diagnostics;
 using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
 
@@ -33,7 +34,10 @@ public partial class DashboardWindow : Window
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ToolStripMenuItem _trayOverlayItem;
     private readonly Drawing.Icon? _applicationIcon;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private bool _allowExit;
+    private LlamaServerPlanner? _sharedPlanner;
+    private bool _llmHealthCheckInProgress;
 
     public DashboardWindow(JsonSettingsStore store)
     {
@@ -58,17 +62,26 @@ public partial class DashboardWindow : Window
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowDashboard);
         _settings = LoadSafely();
         ApplySettings();
-        _timer.Tick += (_, _) => RefreshGame();
-        Loaded += async (_, _) => { RefreshGame(); _timer.Start(); await RefreshHistoryAsync(); };
+        _sharedPlanner = new LlamaServerPlanner(_settings,
+            _settings.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null);
+        _timer.Tick += async (_, _) => { RefreshGame(); await RefreshLlmHealthAsync(); };
+        Loaded += async (_, _) =>
+        {
+            RefreshGame(); _timer.Start();
+            await Task.WhenAll(RefreshHistoryAsync(), StartLlmAtStartupAsync());
+        };
         Closing += OnWindowClosing;
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) HideToTray(); };
         Closed += (_, _) =>
         {
             _timer.Stop();
+            _lifetimeCancellation.Cancel();
             _overlay?.Close();
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
             _applicationIcon?.Dispose();
+            _sharedPlanner?.Dispose();
+            _lifetimeCancellation.Dispose();
         };
     }
 
@@ -129,7 +142,12 @@ public partial class DashboardWindow : Window
 
     private void OnSaveSettings(object sender, RoutedEventArgs e)
     {
-        try { _settings = ReadSettings(); _store.Save(_settings); MessageText.Text = $"設定已儲存至 {_store.Path}"; }
+        try
+        {
+            _settings = ReadSettings();
+            _store.Save(_settings);
+            MessageText.Text = $"設定已儲存至 {_store.Path}；LLM runtime／模型變更請按「重新啟動 LLM」套用";
+        }
         catch (Exception exception) { MessageText.Text = $"無法儲存設定：{exception.Message}"; }
     }
 
@@ -172,32 +190,120 @@ public partial class DashboardWindow : Window
         try
         {
             var candidate = ReadSettings();
-            SetLlmStatus(new(PlannerRuntimePhase.Starting, "正在啟動 llama-server 並載入模型…"));
-            using var planner = new LlamaServerPlanner(candidate,
+            _settings = candidate;
+            _store.Save(candidate);
+            _sharedPlanner ??= new LlamaServerPlanner(candidate,
                 candidate.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null);
+            var planner = _sharedPlanner;
+            SetLlmStatus(new(PlannerRuntimePhase.Starting, "正在確認常駐 llama-server 狀態…"));
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(190));
             var ready = await planner.CheckReadyAsync(timeout.Token);
-            if (ready.Phase != PlannerRuntimePhase.Ready) { SetLlmStatus(ready); return; }
+            if (ready.Phase != PlannerRuntimePhase.Ready)
+            {
+                SetLlmStatus(ready);
+                LlmResultText.Text = $"LLM backend 未就緒：{ready.Message}";
+                return;
+            }
             var window = new WindowsGameWindowLocator().Find();
             if (window is null)
             {
                 SetLlmStatus(new(PlannerRuntimePhase.Ready, $"{ready.Message}；啟動遊戲後才能測試圖片理解", ready.Backend));
+                LlmResultText.Text = "找不到 AOE2 視窗，未進行畫面推論。";
                 return;
             }
             var frame = await new WindowsGdiFrameCapture().CaptureAsync(window, timeout.Token);
             var images = VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
                 new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33));
             var now = DateTimeOffset.UtcNow;
+            var inference = Stopwatch.StartNew();
             var result = await planner.PlanAsync(new SituationContext(new GameState(),
                 GameHistorySummarizer.Summarize(new GameHistory(), TimeSpan.FromSeconds(1), now), null, null, [], now,
                 new VisualObservation(frame.Width, frame.Height, images, "AOE2 screenshot vision readiness test", null, null)), timeout.Token);
-            SetLlmStatus(result.Success && result.Plan?.VisualDecision is not null
-                ? new(PlannerRuntimePhase.Ready, $"VLM 圖片理解已就緒：{result.Plan.VisualDecision.Assessment}", ready.Backend)
-                : new(PlannerRuntimePhase.Error, $"VLM 圖片測試失敗：{result.Error}", ready.Backend));
+            if (result.Success && result.Plan?.VisualDecision is { } decision)
+            {
+                var plan = result.Plan;
+                var runtime = planner.RuntimeStatus;
+                LlmResultText.Text = $"Plan：{plan.PlanId}\nBackend：{runtime.Backend ?? "未知"}\n耗時：{inference.ElapsedMilliseconds} ms\n" +
+                    $"大判斷：{plan.MajorDecision?.Objective}\n中判斷：{plan.MediumDecision?.Objective}\n小判斷：{plan.MinorDecision?.Objective}\n" +
+                    $"模型看到：{decision.Assessment}\n決定：{AutomationController.Describe(decision.Action)}\n理由：{decision.Reason}\n" +
+                    $"信心：{decision.Confidence:P1}\n\n原始 JSON：\n{planner.LastRawResponse}";
+                SetLlmStatus(new(PlannerRuntimePhase.Ready, $"實測完成：{AutomationController.Describe(decision.Action)}，信心 {decision.Confidence:P0}", runtime.Backend));
+            }
+            else
+            {
+                SetLlmStatus(new(PlannerRuntimePhase.Error, $"LLM 實測失敗：{result.Error}", ready.Backend));
+                LlmResultText.Text = $"實測失敗：{result.Error}\n\n原始回覆：\n{planner.LastRawResponse}";
+            }
         }
-        catch (OperationCanceledException) { SetLlmStatus(new(PlannerRuntimePhase.Error, "LLM 測試逾時")); }
-        catch (Exception exception) { SetLlmStatus(new(PlannerRuntimePhase.Error, exception.Message)); }
+        catch (OperationCanceledException) { SetLlmStatus(new(PlannerRuntimePhase.Error, "LLM 實測逾時")); LlmResultText.Text = "LLM 實測逾時。"; }
+        catch (Exception exception) { SetLlmStatus(new(PlannerRuntimePhase.Error, exception.Message)); LlmResultText.Text = exception.ToString(); }
         finally { TestLlmButton.IsEnabled = true; }
+    }
+
+    private async void OnRestartLlm(object sender, RoutedEventArgs e)
+    {
+        RestartLlmButton.IsEnabled = false;
+        TestLlmButton.IsEnabled = false;
+        try
+        {
+            var candidate = ReadSettings();
+            _settings = candidate;
+            _store.Save(candidate);
+            _sharedPlanner ??= new LlamaServerPlanner(candidate,
+                candidate.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null);
+            SetLlmStatus(new(PlannerRuntimePhase.Starting, "正在重新啟動 llama-server 並載入模型…"));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(190));
+            var status = await _sharedPlanner.RestartAsync(candidate, timeout.Token);
+            SetLlmStatus(status);
+            LlmResultText.Text = status.Phase == PlannerRuntimePhase.Ready
+                ? $"llama-server 已由使用者重新啟動：{status.Backend}"
+                : $"llama-server 重新啟動失敗：{status.Message}";
+        }
+        catch (OperationCanceledException) when (!_lifetimeCancellation.IsCancellationRequested)
+        {
+            SetLlmStatus(new(PlannerRuntimePhase.Error, "重新啟動 LLM 逾時"));
+        }
+        catch (Exception exception)
+        {
+            SetLlmStatus(new(PlannerRuntimePhase.Error, exception.Message));
+        }
+        finally
+        {
+            RestartLlmButton.IsEnabled = true;
+            TestLlmButton.IsEnabled = true;
+        }
+    }
+
+    private async Task StartLlmAtStartupAsync()
+    {
+        if (_sharedPlanner is null) return;
+        SetLlmStatus(new(PlannerRuntimePhase.Starting, "AgePilot 已啟動；正在載入 llama-server…"));
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(190));
+            SetLlmStatus(await _sharedPlanner.CheckReadyAsync(timeout.Token));
+        }
+        catch (OperationCanceledException) when (!_lifetimeCancellation.IsCancellationRequested)
+        {
+            SetLlmStatus(new(PlannerRuntimePhase.Error, "AgePilot 啟動時載入 LLM 逾時；請按「重新啟動 LLM」"));
+        }
+    }
+
+    private async Task RefreshLlmHealthAsync()
+    {
+        if (_sharedPlanner is null || _llmHealthCheckInProgress ||
+            _sharedPlanner.RuntimeStatus.Phase != PlannerRuntimePhase.Ready) return;
+        _llmHealthCheckInProgress = true;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            SetLlmStatus(await _sharedPlanner.CheckReadyAsync(timeout.Token));
+        }
+        catch (OperationCanceledException) when (!_lifetimeCancellation.IsCancellationRequested) { }
+        finally { _llmHealthCheckInProgress = false; }
     }
 
     private void SetLlmStatus(PlannerRuntimeStatus status)
@@ -226,7 +332,8 @@ public partial class DashboardWindow : Window
                 _settings,
                 _mouseCapability,
                 _settings.EnableSessionRecording ? SqliteSessionRepository.CreateDefault() : null,
-                _settings.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null)
+                _settings.EnableLocalDiagnostics ? LocalJsonLineLogger.CreateDefault() : null,
+                _sharedPlanner)
             { Opacity = _settings.OverlayOpacity, Owner = this };
             _overlay.CoachUpdated += OnCoachUpdated;
             _overlay.Closed += async (_, _) =>
@@ -289,6 +396,8 @@ public partial class DashboardWindow : Window
             EnableSessionRecording = SessionRecordingCheck.IsChecked == true,
             EnableLocalDiagnostics = LocalDiagnosticsCheck.IsChecked == true,
             EnableAutomationInput = AutomationInputCheck.IsChecked == true,
+            GameHotKeyProfilePath = _settings.GameHotKeyProfilePath,
+            EnableGameKeyboardInput = _settings.EnableGameKeyboardInput,
             TargetAge = Enum.TryParse<GameAge>((TargetAgeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(), out var targetAge)
                 ? targetAge : GameAge.Castle,
             AutomationStartHotKey = AutomationStartHotKeyText.Text.Trim(),

@@ -19,8 +19,10 @@ LLM 不得輸出任意鍵盤序列；它只能選擇使用者設定的語意綁�
 ## Runtime 與小地圖邊界
 
 - 模型為 `models/Qwen3VL-8B-Instruct-Q4_K_M.gguf`，視覺編碼器為 `models/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf`；llama.cpp 位於 `.runtime/llama.cpp`，HIP 優先、Vulkan 備援，只監聽 loopback。
+- Dashboard 啟動時必須立即啟動並載入唯一一個 `llama-server` 子程序；Overlay、實測與自動規劃共用該程序。關閉 Overlay、保存設定或完成單次推論不得停止或重建 server，只有完全結束 AgePilot 才正常終止。
+- `llama-server` 意外退出或 health 失敗時必須顯示錯誤並停止規劃，不得自動重啟；只有使用者按 Dashboard 的「重新啟動 LLM」才可明確終止舊程序並重新載入。
 - `.runtime/` 與 GGUF 不進入版本控制或公開套件。
-- Portable 版由 Dashboard 分別選擇 llama.cpp runtime 目錄與 GGUF 模型檔；「測試 LLM」會啟動 backend、等待 health ready，並顯示未設定、啟動中、載入模型、已就緒、規劃中或錯誤狀態。
+- Portable 版由 Dashboard 分別選擇 llama.cpp runtime 目錄與 GGUF 模型檔；「實測 LLM」會以目前遊戲畫面呼叫正式 Planner，並顯示 backend、Plan ID、判斷、動作、信心與原始 JSON，但不操作遊戲。
 - HIP 啟動時會尋找 `ROCM_PATH/bin` 或最新的 `Program Files/AMD/ROCm/*/bin`，注入子程序 PATH，並要求 `--list-devices` 實際回報 `ROCmN`；只有 CPU backend 時視為失敗，不得以 health endpoint 冒充 GPU ready。
 - 依 ADR 0010，模型契約每輪只允許一個 `Observe`、`Wait`、`LeftClick`、`RightClick` 或 `Drag`；遊戲內不允許鍵盤或語意快捷鍵綁定。輸入送出後，下一輪必須先回報 `Confirmed`、`Failed` 或 `Uncertain`，確認完成前不得執行新動作。
 - 量化提示包含動作數量、人口上限、資源村民目標、資源檢查點與重新評估時間。房屋人口容量及配置總數由可靠觀測確定性校正；實際資源村民尚未被視覺確認前，UI 必須標示為「目標配置（非目前實測）」。

@@ -9,7 +9,7 @@
 **主要技術：** C# / .NET 8 / WPF  
 **核心原則：** Calm、Local、Non-invasive、Player-controlled
 
-> **目前進度（2026-08-09）：** Public Alpha 軟體範圍已實作並產生 self-contained Portable package；四張實機截圖的 24 個必要欄位回歸為 24/24。多時代 Vision 樣本、五局長時間測試、效能與全新 Windows 驗證仍是正式對外發佈前的人工 Gate。詳細狀態見 `doc/business/public-alpha-release.md`。
+> **目前進度（2026-08-13）：** 已建立村民生產與房屋建造程序；人口 OCR 改為失敗即重試、目前值與上限成對確認，人口未知時 fail closed。房屋仍須由使用者實際操作取得 `automation.confirmed` 診斷事件，才能宣稱閉環完成。AgePilot 不保存遊戲畫面。詳細狀態見 `doc/business/public-alpha-release.md` 與 ADR 0017。
 
 ---
 

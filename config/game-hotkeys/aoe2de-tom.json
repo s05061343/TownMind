@@ -1,13 +1,15 @@
 {
   "id": "aoe2de-tom",
-  "description": "解碼自使用者的 快速鍵TOM.hkp 與 快速鍵TOM\\Base.hkp（兩檔互補，合併為遊戲實際生效的一整套快捷鍵）。每一項對應遊戲快捷鍵清單中的一筆，可逐項對照驗證。需要多個按鍵的動作由 GameActionRegistry 組合，不在此寫成複合序列。verified 為 false 時 AgePilot 不會送出任何遊戲按鍵；請先在遊戲中手動按過確認有效，再改為 true。",
-  "verified": false,
+  "description": "解碼自使用者的 快速鍵TOM.hkp 與 快速鍵TOM\\Base.hkp（兩檔互補，合併為遊戲實際生效的一整套快捷鍵）。每一項對應遊戲快捷鍵清單中的一筆，可逐項對照驗證。需要多個按鍵的動作由 GameActionRegistry 組合，不在此寫成複合序列。verified 為 false 時 AgePilot 不會送出任何遊戲按鍵。2026-08-13 由使用者在遊戲中實際按過 H（選城鎮中心）、Q（生產村民）、Z（升時代）確認有效後改為 true；selectIdleVillager 與 selectAllIdleVillagers 屬 Phase 2，尚未實機驗證。",
+  "verified": true,
 
   "keys": {
     "selectTownCenter": "H",
     "queueVillager": "Q",
     "advanceAge": "Z",
     "selectIdleVillager": ".",
-    "selectAllIdleVillagers": "Shift+."
+    "selectAllIdleVillagers": "Shift+.",
+    "openEconomicBuildings": "Q",
+    "buildHouse": "Q"
   }
 }

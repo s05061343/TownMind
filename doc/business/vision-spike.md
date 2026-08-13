@@ -21,6 +21,7 @@
 - [x] Self-contained win-x64 Portable package、SHA-256 與診斷匯出。
 - [x] `GameNotFound / Detected / Loading / Active / Paused / Unavailable / Ended` 狀態與暫停 fail-closed。
 - [x] 變更 ROI 快取、零拷貝 Frame bridge 與可重跑 Vision／Replay JSON 報告。
+- [x] OCR 失敗不快取、下一掃描週期重試，以及人口目前值／上限成對確認。
 - [ ] 多樣本 Vision Gate 準確率驗收。
 - [ ] 小地圖地形／拓撲 MapContext 多樣本 Gate；未通過前不得驅動自動操作。
 
@@ -128,7 +129,7 @@ Population  4 / 5
 
 目前回歸結果：五個欄位與本筆 ground truth 完全一致；Population confidence 約 80%，其他資源約 99.9%～100%。
 
-第二筆實機畫面確認 Food `0` 的 OCR confidence 約 50.5%。45%～70% 的候選值必須連續兩幀完全相同才確認，原始 confidence 保留；低於 70% 的資料不得驅動高信心 Coach Rule。
+第二筆實機畫面確認 Food `0` 的 OCR confidence 約 50.5%。45%～70% 的可解析候選值必須連續兩幀完全相同才確認並進入成功快取；解析失敗或低於 45% 不快取，下一個掃描週期重新辨識。人口目前值與上限必須成對確認；任一不可用時不得驅動人口規則或遊戲輸入。
 
 Cooldown 只適用於未來的聲音、Toast 或重新通知，不得隱藏仍然成立的 Overlay active recommendation。
 

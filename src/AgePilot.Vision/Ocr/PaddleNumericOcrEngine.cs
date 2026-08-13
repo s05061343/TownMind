@@ -9,7 +9,7 @@ namespace AgePilot.Vision.Ocr;
 
 public enum OcrRecognitionModel { Chinese, English }
 
-public sealed class PaddleNumericOcrEngine : IOcrEngine, IDisposable
+public sealed class PaddleNumericOcrEngine : IOcrEngine, IFrameOcrEngine, IDisposable
 {
     private const double PreprocessScale = 2;
     private readonly PaddleOcrRecognizer _recognizer;

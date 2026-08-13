@@ -27,6 +27,7 @@
 | [decisions/0013-scoped-decision-schema-and-legacy-cleanup.md](decisions/0013-scoped-decision-schema-and-legacy-cleanup.md) | 依範圍限定的階層決策 schema、凍結父層邊界改由結構強制、清除舊版扁平計畫殘留 | 修改 LLM 規劃 schema／prompt、`GamePlan` 結構或視覺輸入圖片時 |
 | [decisions/0014-panorama-coordinate-grid-and-notapplicable-fix.md](decisions/0014-panorama-coordinate-grid-and-notapplicable-fix.md) | 全景圖／小地圖座標網格輔助、`PreviousActionResult.NotApplicable` fail-closed 處理（已由 ADR 0015 取代） | 追溯座標網格與 NotApplicable 處理的歷史決策時 |
 | [decisions/0015-game-action-registry.md](decisions/0015-game-action-registry.md) | 具名遊戲動作註冊表、程式化結果驗證、放寬遊戲快捷鍵；取代 ADR 0009 原子工具並修訂 ADR 0010 | 修改動作詞彙、LLM 輸出 schema、輸入後端或動作確認機制時 |
+| [decisions/0017-ocr-retry-and-no-frame-persistence.md](decisions/0017-ocr-retry-and-no-frame-persistence.md) | OCR 失敗重試、人口成對確認、不保存遊戲畫面與人口 Gate | 修改 OCR 快取、人口觀測、房屋決策或本機資料保存時 |
 | [guides/running-phase0.md](guides/running-phase0.md) | 建置、參考圖 OCR、即時單幀掃描與已知限制 | 執行或驗證目前程式時 |
 | [brand/branding.md](brand/branding.md) | 老鷹徽章、色彩、使用規則與資產重建方式 | 修改 UI、封裝、網站或發佈素材時 |
 

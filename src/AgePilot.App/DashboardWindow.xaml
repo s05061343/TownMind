@@ -56,10 +56,16 @@
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <Ellipse x:Name="LlmStatusDot" Width="10" Height="10" Fill="#D3A24C" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBlock x:Name="LlmStatusText" Grid.Column="1" Text="LLM：尚未測試" Foreground="#C9C5BA" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                    <Button x:Name="TestLlmButton" Grid.Column="2" Content="測試 LLM" Click="OnTestLlm" Padding="12,5" Margin="10,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+                    <TextBlock x:Name="LlmStatusText" Grid.Column="1" Text="LLM：隨 AgePilot 啟動中" Foreground="#C9C5BA" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button x:Name="RestartLlmButton" Content="重新啟動 LLM" Click="OnRestartLlm" Padding="12,5" Margin="10,0,0,0" Background="#6A493D" Foreground="#EEE9DD" BorderThickness="0"/>
+                        <Button x:Name="TestLlmButton" Content="實測 LLM" Click="OnTestLlm" Padding="12,5" Margin="8,0,0,0" Background="#42483D" Foreground="#EEE9DD" BorderThickness="0"/>
+                    </StackPanel>
                 </Grid>
             </Border>
+            <TextBox x:Name="LlmResultText" Text="按「實測 LLM」後，這裡會顯示模型對目前遊戲畫面的真實回答；不會操作遊戲。"
+                     IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110" MaxHeight="240"
+                     VerticalScrollBarVisibility="Auto" Margin="0,0,0,12" Padding="8" Background="#20241D" Foreground="#C9C5BA" BorderBrush="#42483D"/>
             <TextBlock Text="llama.cpp Runtime 目錄" Foreground="#9FA695"/>
             <Grid Margin="0,5,0,9">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

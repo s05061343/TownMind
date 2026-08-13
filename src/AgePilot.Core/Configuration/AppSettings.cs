@@ -12,8 +12,8 @@ public sealed class AppSettings
     public bool EnableAutomationInput { get; set; }
     public string GameHotKeyProfilePath { get; set; } = "config/game-hotkeys/aoe2de-tom.json";
     /// <summary>
-    /// 依 ADR 0015 允許對遊戲送出快捷鍵。預設關閉：使用者必須先對照自己的 AOE2 DE 鍵位設定
-    /// 逐項確認 GameHotKeyProfilePath 的綁定並把該檔的 verified 設為 true，才可開啟。
+    /// 舊版的第二層鍵盤授權。Overlay 的「啟用」現在就是本次 Session 的明確授權；
+    /// 保留此欄位只為相容既有 settings.json，不再作為執行 Gate。
     /// </summary>
     public bool EnableGameKeyboardInput { get; set; }
     public GameAge TargetAge { get; set; } = GameAge.Castle;
@@ -41,8 +41,8 @@ public sealed class AppSettings
         if (EnableLocalPlanning && (string.IsNullOrWhiteSpace(LlmModelPath) || string.IsNullOrWhiteSpace(VisionProjectorPath) || string.IsNullOrWhiteSpace(LlamaRuntimePath)))
             throw new InvalidDataException("本機規劃需要模型、mmproj 與 llama.cpp runtime 路徑。");
         if (TargetAge == GameAge.Dark) throw new InvalidDataException("目標時代必須是封建、城堡或帝王時代。");
-        if (EnableGameKeyboardInput && string.IsNullOrWhiteSpace(GameHotKeyProfilePath))
-            throw new InvalidDataException("開啟遊戲鍵盤輸入時必須指定遊戲快捷鍵設定檔路徑。");
+        if (string.IsNullOrWhiteSpace(GameHotKeyProfilePath))
+            throw new InvalidDataException("必須指定遊戲快捷鍵設定檔路徑。");
         if (LlmBackend is not ("auto" or "hip" or "vulkan"))
             throw new InvalidDataException("LLM backend 必須是 auto、hip 或 vulkan。");
         if (LlmPort is < 1024 or > 65535) throw new InvalidDataException("LLM port 必須介於 1024 與 65535。");

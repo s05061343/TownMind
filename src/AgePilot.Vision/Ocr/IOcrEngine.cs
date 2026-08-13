@@ -12,4 +12,13 @@ public interface IOcrEngine
         CancellationToken cancellationToken);
 }
 
+public interface IFrameOcrEngine
+{
+    IReadOnlyList<OcrResult> RecognizeFrame(
+        ReadOnlyMemory<byte> bgraPixels,
+        int frameWidth,
+        int frameHeight,
+        IReadOnlyList<PixelRect> regions);
+}
+
 public sealed record OcrResult(string RawText, int? Value, double Confidence);

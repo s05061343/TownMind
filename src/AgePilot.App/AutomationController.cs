@@ -30,8 +30,13 @@ internal sealed class AutomationController
     private DateTimeOffset _lastActionAt = DateTimeOffset.MinValue;
     private string? _lastFailedPlanId;
     private string? _lastLoggedPlanId;
+    private int _housePlacementIndex;
+    private Task<(bool Sent, string Status)>? _executionTask;
+    private ExecutionAttempt? _executionAttempt;
+    private CancellationTokenSource _executionCancellation = new();
 
-    public AutomationController(AppSettings settings, MouseCapabilitySession mouseCapability, LocalJsonLineLogger? logger = null)
+    public AutomationController(AppSettings settings, MouseCapabilitySession mouseCapability,
+        LocalJsonLineLogger? logger = null)
     {
         _settings = settings;
         _mouseCapability = mouseCapability;
@@ -58,22 +63,52 @@ internal sealed class AutomationController
 
     public bool Enable(bool requireDashboardPermission = true)
     {
+        if (_executionTask?.IsCompleted == false)
+            return RefuseEnable("前一個輸入程序仍在停止中", "execution_stopping");
+        _executionTask = null;
+        _executionAttempt = null;
         if (requireDashboardPermission && !_settings.EnableAutomationInput)
-        { LastStatus = "Dashboard 尚未授權全域啟用"; return false; }
+            return RefuseEnable("Dashboard 尚未授權全域啟用", "dashboard_permission");
         if (!_mouseCapability.IsValidFor(_input.CurrentGameWindowHandle))
-        { LastStatus = "尚未通過本次程式的滑鼠實機測試，或 AOE2 視窗已更換"; return false; }
+        {
+            LastStatus = "正在驗證滑鼠控制能力";
+            var probe = _mouseCapability.Run(_input);
+            if (!probe.Success) return RefuseEnable(probe.Status, "mouse_probe");
+        }
         if (_profile.MinimapRegion is null || _profile.CommandGridRegion is null)
-        { LastStatus = "HUD profile 缺少小地圖或命令面板格位校準"; return false; }
+            return RefuseEnable("HUD profile 缺少小地圖或命令面板格位校準", "hud_profile");
         if (!KeyboardReady(out var keyboardReason))
-        { LastStatus = keyboardReason; return false; }
+            return RefuseEnable(keyboardReason, "game_keyboard");
+        _executionCancellation.Dispose();
+        _executionCancellation = new CancellationTokenSource();
         IsEnabled = true; _consecutiveFailures = 0; _pending = null;
         LastStatus = "已啟用，等待 LLM 選擇動作";
         _logger?.Write("automation.enabled", new { source = "Qwen3-VL", bindings = _bindings.Id });
         return true;
     }
 
+    /// <summary>
+    /// 啟用被拒絕時必須留下日誌。只更新 LastStatus 的話，使用者看到的是「按了沒反應」，
+    /// 而日誌裡一片空白——沒有任何線索可以判斷是哪一道閘門擋下的。
+    /// </summary>
+    private bool RefuseEnable(string reason, string gate)
+    {
+        LastStatus = reason;
+        _logger?.Write("automation.enable_refused", new
+        {
+            gate,
+            reason,
+            _settings.EnableAutomationInput,
+            bindings = _bindings.Id,
+            bindingsVerified = _bindings.Verified,
+            bindingsError = _bindingsError,
+        });
+        return false;
+    }
+
     public void Disable(string reason = "自動操作已停止")
     {
+        _executionCancellation.Cancel();
         IsEnabled = false; _pending = null; LastStatus = reason;
         _logger?.Write("automation.disabled", new { reason });
     }
@@ -87,8 +122,6 @@ internal sealed class AutomationController
     /// </summary>
     private bool KeyboardReady(out string reason)
     {
-        if (!_settings.EnableGameKeyboardInput)
-        { reason = "尚未開啟遊戲鍵盤輸入（EnableGameKeyboardInput）"; return false; }
         if (_bindingsError is not null)
         { reason = $"遊戲快捷鍵設定無法載入：{_bindingsError}"; return false; }
         if (!_bindings.Verified)
@@ -106,6 +139,8 @@ internal sealed class AutomationController
         { Disable("遊戲已離線或結束，已自動停止"); return; }
         if (update.Lifecycle != GameLifecycleState.GameActive)
         { LastStatus = "已啟用；等待穩定的 Active 遊戲畫面"; return; }
+
+        if (_executionTask is not null) { HandleExecutionCompletion(update, now); return; }
 
         // pending 的驗證不依賴新計畫：OCR 每 tick 都在更新，動作結果隨時可能確認。
         if (_pending is not null) { HandlePending(update, plan, now); return; }
@@ -135,31 +170,52 @@ internal sealed class AutomationController
             _logger?.Write("automation.waiting", new { plan.PlanId, kind = decision.Action.Kind.ToString(),
                 decision.Reason, decision.Assessment });
             var waitDelay = TimeSpan.FromMilliseconds(Math.Clamp(decision.RecheckAfterMs, 250, 30000));
-            _pending = new(Describe(decision.Action), plan.PlanId, null, now + waitDelay, now + waitDelay);
+            _pending = new(Describe(decision.Action), plan.PlanId, null, null, now + waitDelay, now + waitDelay);
             return;
         }
 
         if (!GameActionRegistry.TryResolve(decision.Action.Kind, _bindings, update.State, update.State?.Age,
-                out var procedure, out var blockedReason))
+                out var procedure, out var blockedReason, _housePlacementIndex))
         { FailOnce(plan.PlanId, blockedReason, now, plan.MinorDecision?.NodeId); return; }
 
         if (procedure.Steps.Any(step => step.Kind == ProcedureStepKind.GameKey) && !KeyboardReady(out var keyboardReason))
         { FailOnce(plan.PlanId, keyboardReason, now, plan.MinorDecision?.NodeId); return; }
 
-        var sent = _input.TryExecuteProcedure(procedure, _profile.MinimapRegion!.Value, _profile.CommandGridRegion!.Value,
-            _profile.CommandGridRows, _profile.CommandGridColumns, out var inputStatus);
-        if (!sent) { FailOnce(plan.PlanId, inputStatus, now, plan.MinorDecision?.NodeId); return; }
+        var actionId = Guid.NewGuid().ToString("N");
+        _executionAttempt = new(procedure, plan.PlanId, actionId, update.State ?? new GameState(),
+            decision.ExpectedResult, plan.MinorDecision?.NodeId, now);
+        _executionTask = Task.Run(() =>
+        {
+            var sent = _input.TryExecuteProcedure(procedure, _profile.MinimapRegion!.Value, _profile.CommandGridRegion!.Value,
+                _profile.CommandGridRows, _profile.CommandGridColumns, out var status, _executionCancellation.Token);
+            return (sent, status);
+        });
+        LastStatus = $"正在執行：{procedure.Description}";
+    }
 
-        _sentPlans.Add(plan.PlanId); _recentActions.Enqueue(now); _lastActionAt = now; _consecutiveFailures = 0;
-        var baseline = new ActionOutcomeBaseline(procedure.Kind, procedure.Post, update.State ?? new GameState(),
-            now, now + procedure.Timeout);
-        _pending = new(procedure.Description, plan.PlanId, baseline, now, now + procedure.Timeout);
-        LastStatus = $"已執行：{procedure.Description}；等待 HUD 數值確認";
-        LastPlanningEvent = new("visual_action_sent", $"{procedure.Description}；預期：{decision.ExpectedResult}", now,
-            PlanUpdateScope.Minor, plan.MinorDecision?.NodeId);
-        _logger?.Write("automation.sent", new { plan.PlanId, kind = procedure.Kind.ToString(),
-            procedure.Description, inputStatus, postcondition = procedure.Post.Kind.ToString(),
-            resource = procedure.Post.Resource?.ToString(), procedure.Post.Amount, decision.ExpectedResult });
+    private void HandleExecutionCompletion(LiveCoachUpdate update, DateTimeOffset now)
+    {
+        if (_executionTask?.IsCompleted != true) { LastStatus = $"正在執行：{_executionAttempt?.Procedure.Description}"; return; }
+        var task = _executionTask;
+        var attempt = _executionAttempt!;
+        _executionTask = null;
+        _executionAttempt = null;
+        (bool sent, string inputStatus) result;
+        try { result = task.GetAwaiter().GetResult(); }
+        catch (Exception exception) { result = (false, $"輸入程序例外：{exception.Message}"); }
+        if (!result.sent) { FailOnce(attempt.PlanId, result.inputStatus, now, attempt.NodeId); return; }
+
+        _sentPlans.Add(attempt.PlanId); _recentActions.Enqueue(now); _lastActionAt = now; _consecutiveFailures = 0;
+        var baseline = new ActionOutcomeBaseline(attempt.Procedure.Kind, attempt.Procedure.Post, attempt.Baseline,
+            attempt.StartedAt, attempt.StartedAt + attempt.Procedure.Timeout);
+        _pending = new(attempt.Procedure.Description, attempt.PlanId, attempt.ActionId, baseline,
+            attempt.StartedAt, attempt.StartedAt + attempt.Procedure.Timeout);
+        LastStatus = $"已執行：{attempt.Procedure.Description}；等待 HUD 數值確認";
+        LastPlanningEvent = new("visual_action_sent", $"{attempt.Procedure.Description}；預期：{attempt.ExpectedResult}", now,
+            PlanUpdateScope.Minor, attempt.NodeId);
+        _logger?.Write("automation.sent", new { attempt.PlanId, kind = attempt.Procedure.Kind.ToString(),
+            attempt.Procedure.Description, inputStatus = result.inputStatus, postcondition = attempt.Procedure.Post.Kind.ToString(),
+            resource = attempt.Procedure.Post.Resource?.ToString(), attempt.Procedure.Post.Amount, attempt.ExpectedResult });
     }
 
     private void HandlePending(LiveCoachUpdate update, GamePlan? plan, DateTimeOffset now)
@@ -177,6 +233,31 @@ internal sealed class AutomationController
             return;
         }
 
+        if (pending.Baseline.Kind == GameActionKind.BuildHouse && !pending.FoundationConfirmed)
+        {
+            var beforeWood = pending.Baseline.State.Wood;
+            var afterWood = update.State?.Wood;
+            if (beforeWood?.IsUsable == true && afterWood?.IsUsable == true &&
+                beforeWood.Value.GetValueOrDefault() - afterWood.Value.GetValueOrDefault() >= 13)
+            {
+                pending = pending with { FoundationConfirmed = true };
+                _pending = pending;
+                LastStatus = "房屋地基已確認；等待人口上限增加";
+            }
+            else if (now - pending.Baseline.StartedAt >= TimeSpan.FromSeconds(2))
+            {
+                _housePlacementIndex++;
+                FailOnce(pending.PlanId, "房屋落點後兩秒內未觀察到木材扣除", now, nodeId);
+                _pending = null;
+                return;
+            }
+            else
+            {
+                LastStatus = "等待確認房屋地基";
+                return;
+            }
+        }
+
         var result = ActionOutcomeVerifier.Evaluate(pending.Baseline, update.State, history: null, now, out var status);
         switch (result)
         {
@@ -190,6 +271,7 @@ internal sealed class AutomationController
                 return;
 
             case PreviousActionResult.Failed:
+                if (pending.Baseline?.Kind == GameActionKind.BuildHouse) _housePlacementIndex++;
                 FailOnce(pending.PlanId, $"{pending.Description}：{status}", now, nodeId);
                 _pending = null;
                 return;
@@ -229,7 +311,23 @@ internal sealed class AutomationController
     private sealed record PendingAction(
         string Description,
         string PlanId,
+        string? ActionId,
         ActionOutcomeBaseline? Baseline,
         DateTimeOffset NotBefore,
-        DateTimeOffset Deadline);
+        DateTimeOffset Deadline,
+        bool FoundationConfirmed = false);
+
+    private sealed record ExecutionAttempt(GameActionProcedure Procedure, string PlanId, string ActionId,
+        GameState Baseline, string ExpectedResult, string? NodeId, DateTimeOffset StartedAt);
+
+    private static object? Snapshot(GameState? state) => state is null ? null : new
+    {
+        age = state.Age?.ToString(),
+        food = state.Food?.IsUsable == true ? state.Food.Value : null,
+        wood = state.Wood?.IsUsable == true ? state.Wood.Value : null,
+        gold = state.Gold?.IsUsable == true ? state.Gold.Value : null,
+        stone = state.Stone?.IsUsable == true ? state.Stone.Value : null,
+        population = state.Population?.IsUsable == true ? state.Population.Value : null,
+        populationCap = state.PopulationCap?.IsUsable == true ? state.PopulationCap.Value : null,
+    };
 }

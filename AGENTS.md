@@ -41,7 +41,8 @@ Before handing off a code change, run:
 
 ```powershell
 dotnet build AgePilot.sln
-dotnet run --project tests/AgePilot.Tests
 ```
 
-If a check cannot run, report the exact blocker.
+Automation behavior is accepted only from a user-operated live trace containing the UI action,
+LLM plan, sent input, before/after observations, and confirmation. Diagnostic replay output is not
+evidence that live automation works. If a check cannot run, report the exact blocker.

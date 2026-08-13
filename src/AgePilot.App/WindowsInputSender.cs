@@ -71,11 +71,14 @@ internal sealed class WindowsInputSender : IMouseProbeBackend
     /// 半套序列（例如選了城鎮中心卻沒點到按鈕）會讓遊戲停在未預期狀態。
     /// </summary>
     public bool TryExecuteProcedure(GameActionProcedure procedure, NormalizedRect minimap, NormalizedRect commandGrid,
-        int gridRows, int gridColumns, out string status)
+        int gridRows, int gridColumns, out string status, CancellationToken cancellationToken = default,
+        Action<string, object?>? reportStep = null)
     {
         var performed = new List<string>();
         foreach (var step in procedure.Steps)
         {
+            if (cancellationToken.IsCancellationRequested) { status = "程序已由使用者停止"; return false; }
+            reportStep?.Invoke("started", new { kind = step.Kind.ToString(), keys = step.Keys?.Select(key => key.ToString()), step.X, step.Y, step.DelayMs });
             switch (step.Kind)
             {
                 case ProcedureStepKind.GameKey:
@@ -83,6 +86,7 @@ internal sealed class WindowsInputSender : IMouseProbeBackend
                     { status = "程序步驟缺少按鍵"; return false; }
                     if (!TrySendKeys(step.Keys, out status)) return false;
                     performed.Add(status);
+                    reportStep?.Invoke("completed", new { kind = step.Kind.ToString(), status });
                     break;
 
                 case ProcedureStepKind.CommandGridClick:
@@ -92,10 +96,19 @@ internal sealed class WindowsInputSender : IMouseProbeBackend
                             out var x, out var y, out status)) return false;
                     if (!TryClick(x, y, rightClick: false, out status)) return false;
                     performed.Add(status);
+                    reportStep?.Invoke("completed", new { kind = step.Kind.ToString(), status });
+                    break;
+
+                case ProcedureStepKind.WorldClick:
+                    if (!TryClick(step.X, step.Y, rightClick: false, out status)) return false;
+                    performed.Add(status);
+                    reportStep?.Invoke("completed", new { kind = step.Kind.ToString(), status });
                     break;
 
                 case ProcedureStepKind.Delay:
-                    Thread.Sleep(Math.Clamp(step.DelayMs, 0, 2000));
+                    if (cancellationToken.WaitHandle.WaitOne(Math.Clamp(step.DelayMs, 0, 2000)))
+                    { status = "程序已由使用者停止"; return false; }
+                    reportStep?.Invoke("completed", new { kind = step.Kind.ToString(), step.DelayMs });
                     break;
 
                 default:

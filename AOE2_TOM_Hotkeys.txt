@@ -1,0 +1,658 @@
+﻿Age of Empires II: Definitive Edition - TOM Hotkeys
+========================================================================
+Decoded from uploaded .hkp files using raw DEFLATE + HKP record extraction.
+Unknown action names are preserved as String IDs instead of being guessed.
+
+[快速鍵TOM.hkp]
+Compressed size : 1181 bytes
+Decoded size    : 14374 bytes
+Version/Header  : 0x408A3D71
+Hotkey records  : 177
+------------------------------------------------------------------------
+   #   StringID  Hotkey                  Action
+------------------------------------------------------------------------
+   1      19000  Delete                  Delete Unit
+   2      19036  Shift + Delete          Delete All Selected Units
+   3      19214  Q                       Economic Buildings
+   4      19001  Enter                   Send Chat Message
+   5      19004  Numpad +                Speed Up Game
+   6      19005  Numpad -                Slow Down Game
+   7      19028  Page Up                 Review Chat Messages Backward
+   8      19029  Page Down               Review Chat Messages Forward
+   9      19057  Ctrl + Page Up          Review Event Messages Backward
+  10      19058  Ctrl + Page Down        Review Event Messages Forward
+  11      19268  Alt + S                 Display Statistics
+  12      19282  F5                      Display Technology Tree
+  13      19281  F9                      Display Options Screen
+  14     300409  F1                      Toggle Extended Tooltips
+  15      19010  F11                     Display Game Time
+  16      19235  Alt + F                 Flare
+  17      19293  Alt + C                 Mini-map Combat Mode
+  18      19294  Alt + R                 Mini-map Economic Mode
+  19      19295  Alt + N                 Mini-map Normal Mode
+  20      19298  F8                      Diplomacy
+  21      19299  F10                     Menu
+  22      19300  F6                      Objectives
+  23      19301  F7                      Chat Dialog
+  24      19323  F3                      Pause Game
+  25      19325  F2                      Save Game
+  26      19327  Alt + G                 Toggle Friend or Foe Colors
+  27      19326  Backspace               Return to Previous View
+  28      19328  F4                      Save Chapter
+  29      19076  Shift + ,               Select all Land Military Units
+  30      19077  Shift + .               Select all Idle Villagers
+  31      19078  Alt + ,                 Select all Visible Land Military Units
+  32      19079  Alt + .                 Select all Idle Trade Carts
+  33      19091  Alt + Shift + G         Toggle Visual Grid
+  34      19129  Alt + H                 Toggle Health Bar
+  35      19153  Alt + P                 Toggle Idle Pointers
+  36      19139  Ctrl + Alt + .          Select all Trade Carts/Cogs
+  37      19140  Ctrl + ,                Select all Idle Land/Naval Military Units
+  38      19239  Unbound                 Unselect
+  39      19240  Unbound                 Cancel
+  40     419066  Ctrl + Shift + O        Select all land Hero units
+  41     419067  Ctrl + Shift + ;        Select all non-combatant Hero units
+  42     419068  Ctrl + Shift + P        Select all naval Hero units
+  43      19023  .                       Go to Next Idle Villager
+  44      19023  KeyCode 251             Go to Next Idle Villager
+  45      19024  Home                    Go to Last Notification
+  46      19024  KeyCode 253             Go to Last Notification
+  47      19068  ,                       Go to Next Idle Military Unit
+  48      19068  Unbound                 Go to Next Idle Military Unit
+  49      19025  Space                   Go to Selected Object
+  50      19135  Ctrl + Alt + ,          Go to King
+  51     419069  Ctrl + O                Go to next land Hero units
+  52     419070  Ctrl + ;                Go to next non-combatant Hero units
+  53     419071  Ctrl + P                Go to next naval Hero units
+  54      19244  Ctrl + 1                Create Group #1
+  55      19245  Ctrl + 2                Create Group #2
+  56      19246  Ctrl + 3                Create Group #3
+  57      19247  Ctrl + 4                Create Group #4
+  58      19248  Ctrl + 5                Create Group #5
+  59      19249  Ctrl + 6                Create Group #6
+  60      19250  Ctrl + 7                Create Group #7
+  61      19251  Ctrl + 8                Create Group #8
+  62      19252  Ctrl + 9                Create Group #9
+  63     181037  Ctrl + 0                Create Group #10
+  64     181038  Ctrl + Alt + 1          Create Group #11
+  65     181039  Ctrl + Alt + 2          Create Group #12
+  66     181040  Ctrl + Alt + 3          Create Group #13
+  67     181041  Ctrl + Alt + 4          Create Group #14
+  68     181042  Ctrl + Alt + 5          Create Group #15
+  69     181043  Ctrl + Alt + 6          Create Group #16
+  70     181044  Ctrl + Alt + 7          Create Group #17
+  71     181045  Ctrl + Alt + 8          Create Group #18
+  72     181046  Ctrl + Alt + 9          Create Group #19
+  73     181047  Ctrl + Alt + 0          Create Group #20
+  74      19254  1                       Select Group #1
+  75      19255  2                       Select Group #2
+  76      19256  3                       Select Group #3
+  77      19257  4                       Select Group #4
+  78      19258  5                       Select Group #5
+  79      19259  6                       Select Group #6
+  80      19260  7                       Select Group #7
+  81      19261  8                       Select Group #8
+  82      19262  9                       Select Group #9
+  83     181048  0                       Select Group #10
+  84     181049  Alt + 1                 Select Group #11
+  85     181050  Alt + 2                 Select Group #12
+  86     181051  Alt + 3                 Select Group #13
+  87     181052  Alt + 4                 Select Group #14
+  88     181053  Alt + 5                 Select Group #15
+  89     181054  Alt + 6                 Select Group #16
+  90     181055  Alt + 7                 Select Group #17
+  91     181056  Alt + 8                 Select Group #18
+  92     181057  Alt + 9                 Select Group #19
+  93     181058  Alt + 0                 Select Group #20
+  94     181059  Ctrl + Shift + 1        Select & Center Group #1
+  95     181060  Ctrl + Shift + 2        Select & Center Group #2
+  96     181061  Ctrl + Shift + 3        Select & Center Group #3
+  97     181062  Ctrl + Shift + 4        Select & Center Group #4
+  98     181063  Ctrl + Shift + 5        Select & Center Group #5
+  99     181064  Ctrl + Shift + 6        Select & Center Group #6
+ 100     181065  Ctrl + Shift + 7        Select & Center Group #7
+ 101     181066  Ctrl + Shift + 8        Select & Center Group #8
+ 102     181067  Ctrl + Shift + 9        Select & Center Group #9
+ 103     181068  Ctrl + Shift + F10      Select & Center Group #10
+ 104     181069  Ctrl + Alt + Shift + 1  Select & Center Group #11
+ 105     181070  Ctrl + Alt + Shift + 2  Select & Center Group #12
+ 106     181071  Ctrl + Alt + Shift + 3  Select & Center Group #13
+ 107     181072  Ctrl + Alt + Shift + 4  Select & Center Group #14
+ 108     181073  Ctrl + Alt + Shift + 5  Select & Center Group #15
+ 109     181074  Ctrl + Alt + Shift + 6  Select & Center Group #16
+ 110     181075  Ctrl + Alt + Shift + 7  Select & Center Group #17
+ 111     181076  Ctrl + Alt + Shift + 8  Select & Center Group #18
+ 112     181077  Ctrl + Alt + Shift + 9  Select & Center Group #19
+ 113     181078  Ctrl + Alt + Shift + F10  Select & Center Group #20
+ 114     181079  Shift + 1               Append Group #1
+ 115     181080  Shift + 2               Append Group #2
+ 116     181081  Shift + 3               Append Group #3
+ 117     181082  Shift + 4               Append Group #4
+ 118     181083  Shift + 5               Append Group #5
+ 119     181084  Shift + 6               Append Group #6
+ 120     181085  Shift + 7               Append Group #7
+ 121     181086  Shift + 8               Append Group #8
+ 122     181087  Shift + 9               Append Group #9
+ 123     181088  Shift + 0               Append Group #10
+ 124     181089  Alt + Shift + 1         Append Group #11
+ 125     181090  Alt + Shift + 2         Append Group #12
+ 126     181091  Alt + Shift + 3         Append Group #13
+ 127     181092  Alt + Shift + 4         Append Group #14
+ 128     181093  Alt + Shift + 5         Append Group #15
+ 129     181094  Alt + Shift + 6         Append Group #16
+ 130     181095  Alt + Shift + 7         Append Group #17
+ 131     181096  Alt + Shift + 8         Append Group #18
+ 132     181097  Alt + Shift + 9         Append Group #19
+ 133     181098  Alt + Shift + 0         Append Group #20
+ 134      19099  U                       Ungroup Control Group
+ 135      19006  Left Arrow              Scroll Left
+ 136      19007  Right Arrow             Scroll Right
+ 137      19008  Up Arrow                Scroll Up
+ 138      19009  Down Arrow              Scroll Down
+ 139      19128  /                       Click-Drag Scroll
+ 140      20031  Numpad +                Replay Speed Up
+ 141      20032  Numpad -                Replay Speed Down
+ 142      20033  Ctrl + Left Arrow       Set Speed to Slow
+ 143      20034  Ctrl + Up Arrow         Set Speed to Default
+ 144      20035  Ctrl + Down Arrow       Set Speed to Fast
+ 145      20036  Ctrl + Right Arrow      Set Speed to Extra Fast
+ 146      20037  Ctrl + Shift + F9       Watch Gaia
+ 147      20038  Ctrl + Shift + F1       Watch Player One
+ 148      20039  Ctrl + Shift + F2       Watch Player Two
+ 149      20040  Ctrl + Shift + F3       Watch Player Three
+ 150      20041  Ctrl + Shift + F4       Watch Player Four
+ 151      20042  Ctrl + Shift + F5       Watch Player Five
+ 152      20043  Ctrl + Shift + F6       Watch Player Six
+ 153      20044  Ctrl + Shift + F7       Watch Player Seven
+ 154      20045  Ctrl + Shift + F8       Watch Player Eight
+ 155      19312  Q                       Patrol
+ 156      19313  W                       Guard
+ 157      19314  E                       Follow
+ 158      19315  A                       Aggressive
+ 159      19316  S                       Defensive
+ 160      19317  D                       Stand Ground
+ 161      19318  F                       No Attack
+ 162     200008  R                       Attack Move
+ 163      19350  G                       Auto Scout
+ 164      19352  B                       Build (Serjeant)
+ 165      19303  X                       Box
+ 166      19304  Z                       Line
+ 167      19305  C                       Staggered
+ 168      19306  V                       Flank
+ 169      19234  B                       [Unknown String ID 19234]
+ 170      19087  KeyCode 255             Zoom In
+ 171      19088  KeyCode 254             Zoom Out
+ 172      19089  Ctrl + =                Zoom In
+ 173      19090  Ctrl + -                Zoom Out
+ 174      19120  Ctrl + Backspace        Reset Zoom
+ 175      19331  Ctrl + KeyCode 255      Rotate Gate Clockwise
+ 176      19332  Ctrl + KeyCode 254      Rotate Gate Counterclockwise
+ 177      19122  Q                       Lock/Unlock Gate
+
+
+[Base.hkp]
+Compressed size : 2154 bytes
+Decoded size    : 34342 bytes
+Version/Header  : 0x408A3D71
+Hotkey records  : 456
+------------------------------------------------------------------------
+   #   StringID  Hotkey                  Action
+------------------------------------------------------------------------
+   1      19215  W                       Military Buildings
+   2      19224  E                       Repair
+   3      19216  G                       Stop
+   4      19225  Q                       Unload/Ungarrison
+   5      19263  T                       [Unknown String ID 19263]
+   6      19241  W                       Pack
+   7      19242  Q                       Unpack
+   8      19221  W                       Heal
+   9      19222  Q                       Convert
+  10      19233  Q                       Drop Relic
+  11      19012  T                       Garrison
+  12      19002  T                       Set Gather Point
+  13      19220  T                       Attack Ground
+  14      19121  T                       Remove Gather Point
+  15      20208  G                       Ungarrison
+  16      19144  B                       Change Weapon
+  17      19162  B                       [Unknown String ID 19162]
+  18      19217  B                       More Items
+  19     400017  F                       Seek Shelter
+  20     400021  A                       Drop Off Resources
+  21      19161  Alt + T                 Set Gather Point on Self
+  22      19743  B                       Fortified Church: Go Back to Work
+  23      19190  Q                       [Unknown String ID 19190]
+  24      19191  W                       [Unknown String ID 19191]
+  25      19192  E                       [Unknown String ID 19192]
+  26      19003  Ctrl + Shift + Space    Select all Military Buildings
+  27      19013  Ctrl + Shift + D        Select all Docks
+  28     419009  Ctrl + Shift + D        Select all Ports
+  29     419010  Ctrl + Shift + R        Select all Shipyards
+  30      19014  Ctrl + Shift + B        Select all Barracks
+  31      19015  Ctrl + Shift + A        Select all Archery Ranges
+  32      19016  Ctrl + Shift + L        Select all Stables
+  33      19017  Ctrl + Shift + K        Select all Siege Workshops
+  34      19018  Ctrl + Shift + V        Select all Castles
+  35      19020  Ctrl + Shift + Y        Select all Monasteries
+  36      19159  Ctrl + Shift + Z        Select all Mule Carts
+  37      19021  Ctrl + Shift + H        Select all Town Centers
+  38      19131  Ctrl + Shift + M        Select all Markets
+  39      19132  Ctrl + Shift + S        Select all Blacksmith
+  40      19155  Ctrl + Shift + I        Select all Mills
+  41      19156  Ctrl + Shift + G        Select all Mining Camps
+  42      19157  Ctrl + Shift + Z        Select all Lumber Camps
+  43      19133  Ctrl + Shift + U        Select all Universities
+  44      19019  Ctrl + Shift + T        Select all Kreposts
+  45      19137  Ctrl + Shift + N        Select all Donjons
+  46      19164  Ctrl + Shift + T        [Unknown String ID 19164]
+  47     419132  Ctrl + Shift + W        Select all Wonders and Monuments
+  48     419040  Ctrl + Shift + N        Select all Polemarchs (Spartans)
+  49     419134  Ctrl + Shift + J        [Unknown String ID 419134]
+  50     419146  Ctrl + Shift + H        [Unknown String ID 419146]
+  51      19026  H                       Go to Town Center
+  52      19026  KeyCode 252             Go to Town Center
+  53      19027  Ctrl + M                Go to Market
+  54      19269  Ctrl + B                Go to Barracks
+  55      19270  Ctrl + A                Go to Archery Range
+  56      19271  Ctrl + L                Go to Stable
+  57      19272  Ctrl + K                Go to Siege Workshop
+  58      19273  Ctrl + D                Go to Dock
+  59     419031  Ctrl + D                Go to Port
+  60     419032  Ctrl + R                Go to Shipyard
+  61      19274  Ctrl + Y                Go to Monastery
+  62      19354  Ctrl + Z                Go to Mule Cart
+  63      19275  Ctrl + S                Go to Blacksmith
+  64      19276  Ctrl + I                Go to Mill
+  65      19277  Ctrl + U                Go to University
+  66      19290  Ctrl + V                Go to Castle
+  67      19291  Ctrl + G                Go to Mining Camp
+  68      19292  Ctrl + Z                Go to Lumber Camp
+  69      19330  Ctrl + T                Go to Krepost
+  70      19136  Ctrl + N                Go to Donjon
+  71      19165  Ctrl + T                [Unknown String ID 19165]
+  72     419133  Ctrl + W                Go to Wonder or Monument
+  73     419041  Ctrl + N                Go to Polemarch (Spartans)
+  74     419135  Ctrl + V                [Unknown String ID 419135]
+  75     419145  Ctrl + H                [Unknown String ID 419145]
+  76      19213  Q                       House
+  77      19236  W                       Mill
+  78      19063  S                       Blacksmith
+  79      19067  T                       Dock
+  80     419007  T                       Port
+  81     419008  T                       Shipyard
+  82      19064  Q                       Barracks
+  83      19210  S                       Palisade Wall
+  84      19237  D                       Market
+  85      19211  D                       Stone Wall
+  86      19201  F                       Tower
+  87      19204  G                       Bombard Tower
+  88      19264  Z                       Gate
+  89      19200  A                       Farm
+  90      19062  W                       Archery Range
+  91      19206  E                       Stable
+  92      19065  F                       Monastery
+  93      19238  Z                       Town Center
+  94      19205  R                       Siege Workshop
+  95      19208  G                       University
+  96      19209  X                       Wonder
+  97      19066  C                       Castle
+  98      19283  R                       Lumber Camp
+  99      19288  E                       Mining Camp
+ 100      19202  Q                       Fish Trap
+ 101      19203  A                       Outpost
+ 102      19243  V                       More Buildings
+ 103      19212  X                       Palisade Gate
+ 104      19075  C                       Feitoria
+ 105      19329  T                       Krepost
+ 106      19186  Unbound                 [Unknown String ID 19186]
+ 107      19138  T                       Donjon
+ 108      19148  C                       Caravanserai
+ 109      19158  R                       Mule Cart
+ 110     419144  G                       [Unknown String ID 419144]
+ 111     419157  X                       [Unknown String ID 419157]
+ 112      19163  W                       [Unknown String ID 19163]
+ 113      19054  Q                       Villager
+ 114     419033  W                       Polemarch
+ 115      19319  B                       Ring Town Bell
+ 116      19324  F                       Go Back to Work
+ 117      19333  A                       Tech: Loom
+ 118      19334  S                       Tech: Wheelbarrow, Hand Cart
+ 119      19335  D                       Tech: Town Watch, Town Guard
+ 120      19336  Z                       Tech: Age Up
+ 121     400018  V                       All Back to Work
+ 122     419042  W                       Tech: Economic Town Center
+ 123     419043  E                       Tech: Military Town Center
+ 124     419044  R                       Tech: Defensive Town Center
+ 125     419045  W                       Tech: Economic Policy
+ 126     419046  E                       Tech: Naval Policy
+ 127     419047  R                       Tech: Military Policy
+ 128     419050  E                       Tech: Ephorate
+ 129     419051  R                       Tech: Morai
+ 130     419048  X                       Tech: Skeuophoroi, Hippagretai
+ 131      19045  Q                       Fishing Ship
+ 132      19044  S                       Trade Cog
+ 133      19059  W                       Galley, War Galley, Galleon
+ 134      19055  F                       Cannon Galleon
+ 135      19279  R                       Fire Ship, Fast Fire Ship
+ 136      19280  D                       Demolition Ship, Heavy Demolition Ship
+ 137      19358  B                       [Unknown String ID 19358]
+ 138      19355  E                       [Unknown String ID 19355]
+ 139      19284  A                       Transport
+ 140      19053  D                       Unique Warships
+ 141      19341  Z                       Tech: Gillnets
+ 142      19344  X                       Tech: War Galley, Galleon
+ 143      19345  C                       Tech: Heavy Demolition Ship
+ 144      19347  V                       Tech: (Elite) Cannon Galleon
+ 145      19457  C                       Tech: Elite Unique Ship
+ 146      19123  Z                       Rebuild Fish Trap
+ 147      19101  X                       Toggle Automatic Fish Trap Rebuilding
+ 148      19154  F                       Dromon
+ 149      19035  Q                       Milita, Man-at-Arms, etc. (swordsmen)
+ 150      19034  W                       Spearman, Pikeman, Halberdier
+ 151      19070  R                       Eagle Warrior, Elite Eagle Warrior
+ 152      19073  E                       Condottiero (Huskarl in HD)
+ 153      19125  R                       Huskarl
+ 154     419001  R                       Hoplite
+ 155      19451  A                       Tech: Swordsmen Upgrades
+ 156      19452  S                       Tech: Pikeman, Halberdier
+ 157      19453  F                       Tech: (Elite) Eagle Warrior
+ 158      19166  F                       [Unknown String ID 19166]
+ 159      19454  Z                       Tech: Supplies
+ 160      19455  X                       Tech: Squires
+ 161      19456  C                       Tech: Arson
+ 162     419038  Z                       Tech: Battle Drills
+ 163      19141  R                       Flemish Militia
+ 164     419140  B                       [Unknown String ID 419140]
+ 165     419216  R                       [Unknown String ID 419216]
+ 166     419217  F                       [Unknown String ID 419217]
+ 167      19038  Q                       Archer, Crossbowman, Arbalest (archers)
+ 168      19043  W                       Skirmister, Elite Skirmisher
+ 169      19040  E                       Cavarly Archer, Heavy Cavalry Archer
+ 170      19041  R                       Hand Cannoneer, Slinger
+ 171      19032  F                       Genitour
+ 172      19126  R                       Slinger
+ 173      19458  A                       Tech: Crossbowman, Arbalester
+ 174      19459  S                       Tech: Elite, Imperial Skirmisher
+ 175      19460  D                       Tech: Heavy Cavalry Archer
+ 176      19463  V                       Tech: Elite Genitour
+ 177      19461  Z                       Tech: Thumb Ring
+ 178      19462  C                       Tech: Parthian Tactics
+ 179      19145  E                       Elephant Archer
+ 180      19149  D                       Tech: Elite Elephant Archer
+ 181     419141  B                       [Unknown String ID 419141]
+ 182      19060  Q                       Scout Cavalry, Light Cavalry, Hussar
+ 183      19031  E                       Camel, Heavy Camel
+ 184      19030  W                       Knight, Cavalier, Paladin (knights)
+ 185      19033  R                       Battle Elephant, Elite Battle Elephant
+ 186      19124  R                       Tarkan
+ 187      19127  R                       Steppe Lancer
+ 188     419003  R                       War Chariot
+ 189      19464  A                       Tech: Light Cavalry, Hussar
+ 190      19465  S                       Tech: Cavalier, Paladin
+ 191      19466  D                       Tech: Heavy, Imperial Camel Rider
+ 192      19467  F                       Tech: Battle Elephant, Steppe Lancer
+ 193     419004  F                       Tech: Elite War Chariot
+ 194      19468  Z                       Tech: Bloodlines
+ 195      19469  X                       Tech: Husbandry
+ 196      19143  Q                       Xolotl Warrior
+ 197      19147  W                       Shrivamsha Rider
+ 198      19152  F                       Tech: Elite Battle Elephant
+ 199      19151  S                       Tech: Elite Shrivamsha Rider
+ 200     419142  B                       [Unknown String ID 419142]
+ 201     419218  R                       [Unknown String ID 419218]
+ 202     419219  F                       [Unknown String ID 419219]
+ 203      19056  Q                       Battering Ram, Capped Ram, Siege Ram
+ 204      19049  E                       Scorpion, Heavy Scorpion
+ 205      19285  W                       Mangonel, Onager, Siege Onager
+ 206      19047  R                       Bombard Cannon
+ 207      19048  V                       Siege Tower
+ 208      19475  A                       Tech: Capped, Siege Ram
+ 209      19476  S                       Tech: (Siege) Onager
+ 210      19477  D                       Tech: Heavy Scorpion
+ 211      19142  F                       Conscription
+ 212      19146  Q                       Armored Elephant
+ 213      19150  A                       Tech: Siege Elephant
+ 214      19134  R                       Flaming Camel
+ 215      19051  Q                       Monk
+ 216      19071  V                       Missionary
+ 217      19478  W                       Tech: Redemption
+ 218      19479  E                       Tech: Atonement
+ 219      19480  R                       Tech: Fervor
+ 220      19481  A                       Tech: Sanctity
+ 221      19482  S                       Tech: Devotion, Faith
+ 222      19483  D                       Tech: Illumination
+ 223      19484  F                       Tech: Block Printing
+ 224      19485  Z                       Tech: Heresy
+ 225      19486  X                       Tech: Theocracy
+ 226      19487  C                       Tech: Herbal Medicine
+ 227      19286  Q                       Trade Cart
+ 228      19348  W                       Tech: Caravan
+ 229      19349  E                       Tech: Coinage, Banking
+ 230      19450  R                       Tech: Guilds
+ 231      19102  D                       Sell 100 Food
+ 232      19103  S                       Sell 100 Wood
+ 233      19104  F                       Sell 100 Stone
+ 234      19111  C                       Buy 100 Food
+ 235      19112  X                       Buy 100 Wood
+ 236      19113  V                       Buy 100 Stone
+ 237      19321  W                       Build Trebuchet
+ 238      19322  Q                       Build Unique Unit
+ 239      19069  E                       Petard
+ 240      19080  A                       Tech: Elite Unique Unit
+ 241      19082  D                       Tech: Unique Imperial Technology
+ 242      19081  S                       Tech: Unique Castle Technology
+ 243      19083  Z                       Tech: Hoardings
+ 244      19084  X                       Tech: Sappers
+ 245      19085  C                       Tech: Conscription
+ 246      19086  V                       Tech: Spies/Treason
+ 247      19130  R                       Elite Kipchak
+ 248      19074  R                       Reseed Farm
+ 249      19337  Q                       Tech: Farm Upgrades
+ 250      19100  T                       Toggle Automatic Farm Reseeding
+ 251      19338  Q                       Tech: Gold Upgrades
+ 252      19339  W                       Tech: Stone Upgrades
+ 253      19340  Q                       Tech: Wood Upgrades
+ 254      19470  Q                       Tech: Melee Attack Upgrades
+ 255      19473  A                       Tech: Arrow Attack Upgrades
+ 256      19471  W                       Tech: Infantry Armor Upgrades
+ 257      19472  E                       Tech: Cavalry Armor Upgrades
+ 258      19474  S                       Tech: Archer Armor Upgrades
+ 259      19488  Q                       Tech: Masonry, Architecture
+ 260      19489  W                       Tech: Treadmill Crane
+ 261      19490  E                       Tech: Heated Shot
+ 262      19491  R                       Tech: Ballistics
+ 263      19492  T                       Tech: Chemistry
+ 264      19493  A                       Tech: Siege Engineers
+ 265      19494  G                       Tech: Arrowslits
+ 266      19495  S                       Tech: Murder Holes
+ 267      19496  F                       Tech: Tower Upgrades
+ 268      19497  D                       Tech: Fortified Wall
+ 269      19342  Z                       Tech: Careening, Dry Dock
+ 270      19356  X                       [Unknown String ID 19356]
+ 271      19343  C                       Tech: Shipwright
+ 272      19357  V                       [Unknown String ID 19357]
+ 273      19174  Q                       [Unknown String ID 19174]
+ 274      19170  W                       [Unknown String ID 19170]
+ 275      19172  E                       [Unknown String ID 19172]
+ 276      19187  Q                       [Unknown String ID 19187]
+ 277      19167  W                       [Unknown String ID 19167]
+ 278      19175  X                       [Unknown String ID 19175]
+ 279      19171  C                       [Unknown String ID 19171]
+ 280      19173  V                       [Unknown String ID 19173]
+ 281      19169  Z                       [Unknown String ID 19169]
+ 282      19179  Q                       [Unknown String ID 19179]
+ 283      19168  W                       [Unknown String ID 19168]
+ 284      19189  A                       [Unknown String ID 19189]
+ 285      19188  S                       [Unknown String ID 19188]
+ 286      19181  R                       [Unknown String ID 19181]
+ 287      19182  F                       [Unknown String ID 19182]
+ 288      19185  E                       [Unknown String ID 19185]
+ 289     419005  S                       Tech: First Unique Classical Technology
+ 290     419058  D                       Tech: Second Unique Classical Technology
+ 291     419006  X                       Tech: First Unique Imperial Technology
+ 292     419059  C                       Tech: Second Unique Imperial Technology
+ 293     419138  X                       [Unknown String ID 419138]
+ 294     419139  C                       [Unknown String ID 419139]
+ 295     419011  Q                       Fishing Ship
+ 296     419012  E                       Merchant Ship
+ 297     419013  W                       Transport Ship
+ 298     419014  R                       Lembos
+ 299     419016  A                       Tech: Scoop Nets
+ 300     419017  S                       Tech: Drums
+ 301     419018  D                       Tech: Shipwright
+ 302     419015  F                       Tech: (War, Heavy, Elite) Lembos
+ 303      19184  Z                       [Unknown String ID 19184]
+ 304      19183  X                       [Unknown String ID 19183]
+ 305     419057  V                       Toggle Trading Ratio
+ 306     419019  Q                       Monoreme
+ 307     419020  W                       Galley
+ 308     419021  E                       Incendiary Raft
+ 309     419023  R                       Catapult Ship
+ 310     419024  Z                       Leviathan
+ 311     419030  X                       Tech: Hypozomata
+ 312     419025  A                       Tech: Bireme, Trireme
+ 313     419026  S                       Tech: (Heavy, Elite) Galley
+ 314     419027  D                       Tech: (Heavy) Incendiary Ship
+ 315     419029  F                       Tech: Onager Ship
+ 316     419137  Q                       [Unknown String ID 419137]
+ 317     419073  B                       Bodyguard
+ 318     419074  E                       Lysander's Raider
+ 319     419075  R                       Mercenary Hoplite
+ 320     419076  A                       Lancer (Army Tent)
+ 321     419077  S                       Laminated Bowman (Army Tent)
+ 322     419078  W                       Strategos (Army Tent)
+ 323     419079  D                       Gastraphetoros (Army Tent)
+ 324     419080  Z                       Priestess (Army Tent)
+ 325     419081  E                       Swordsman (Army Tent)
+ 326     419082  Q                       Bodyguard (Army Tent)
+ 327     419083  Q                       Emissary
+ 328     419089  Q                       Hippeus (Army Tent)
+ 329     419092  Q                       Immortal (Army Tent)
+ 330     419093  W                       War Chariot (Army Tent)
+ 331     419094  E                       Palintonon (Army Tent)
+ 332     419084  Z                       Prayer to Apollo
+ 333     419085  X                       Prayer to Ares
+ 334     419086  C                       Prayer to Artemis
+ 335     419087  V                       Prayer to Hephaestus
+ 336     419088  Q                       Trigger Ambush
+ 337     419091  A                       Tech: Elite Hippeus (Army Tent)
+ 338     419090  S                       Tech: Elite Strategos (Army Tent)
+ 339     419095  Q                       Tech: Cavalry Aura Upgrade
+ 340     419096  W                       Tech: Infantry Aura Upgrade
+ 341     419097  E                       Tech: Archer Aura Upgrade
+ 342     419098  Q                       Tech: Hipparchs
+ 343     419099  W                       Tech: War Dances
+ 344     419100  R                       Tech: Forced Levies
+ 345     419101  T                       Tech: Harmosts
+ 346     419102  A                       Tech: Hippotoxotai
+ 347     419103  S                       Tech: Othismos
+ 348     419104  F                       Tech: Double Wine Rations
+ 349     419105  G                       Tech: Thessalian Warhorses
+ 350     419106  Z                       Tech: Reinforced Prow
+ 351     419107  X                       Tech: Paean
+ 352     419108  V                       Tech: Black Broth
+ 353     419109  B                       Tech: Lysander's Furor
+ 354     419110  C                       Tech: Careful Captains, Belligerent Captains
+ 355     419111  V                       Tech: Sea Shanties, Hymns to Poseidon
+ 356     419112  G                       Tech: Strengthened Hulls, Oakum
+ 357     419113  G                       Tech: Marines, Hardened Marines
+ 358     419114  C                       Tech: Artillery Spotters
+ 359     419115  B                       Tech: Themistocles' Masterplan
+ 360     419116  Q                       Low Tribute
+ 361     419117  W                       Medium Tribute
+ 362     419118  E                       High Tribute
+ 363     419119  Q                       Tech: Sell Estate
+ 364     419120  W                       Tech: Repair Acropolis
+ 365     419121  E                       Tech: Sell Athena's Gold
+ 366     419122  R                       Embassy to the Oracle
+ 367     419123  A                       Raid the Peloponnese
+ 368     419124  S                       Tech: Colonize Aegina
+ 369     419125  D                       Host Festival
+ 370     419126  Z                       Tech: Prosecute Cleon
+ 371     419127  X                       Bribe Rioters
+ 372     419128  V                       Tech: Burn Plague Bodies
+ 373     419129  B                       Tech: Funeral Ovation
+ 374     419130  E                       Tech: Krypteia (Army Tent)
+ 375     419131  R                       Tech: Othismos (Army Tent)
+ 376     419147  Q                       [Unknown String ID 419147]
+ 377     419148  W                       [Unknown String ID 419148]
+ 378     419149  E                       [Unknown String ID 419149]
+ 379     419150  R                       [Unknown String ID 419150]
+ 380     419151  A                       [Unknown String ID 419151]
+ 381     419152  S                       [Unknown String ID 419152]
+ 382     419153  D                       [Unknown String ID 419153]
+ 383     419154  F                       [Unknown String ID 419154]
+ 384     419155  Z                       [Unknown String ID 419155]
+ 385     419156  X                       [Unknown String ID 419156]
+ 386     419158  Q                       [Unknown String ID 419158]
+ 387     419159  W                       [Unknown String ID 419159]
+ 388     419160  E                       [Unknown String ID 419160]
+ 389     419161  R                       [Unknown String ID 419161]
+ 390     419162  A                       [Unknown String ID 419162]
+ 391     419163  A                       [Unknown String ID 419163]
+ 392     419164  Q                       [Unknown String ID 419164]
+ 393     419165  Q                       [Unknown String ID 419165]
+ 394     419166  W                       [Unknown String ID 419166]
+ 395     419167  E                       [Unknown String ID 419167]
+ 396     419168  A                       [Unknown String ID 419168]
+ 397     419169  S                       [Unknown String ID 419169]
+ 398     419170  D                       [Unknown String ID 419170]
+ 399     419171  F                       [Unknown String ID 419171]
+ 400     419172  Q                       [Unknown String ID 419172]
+ 401     419173  W                       [Unknown String ID 419173]
+ 402     419174  E                       [Unknown String ID 419174]
+ 403     419175  R                       [Unknown String ID 419175]
+ 404     419176  Q                       [Unknown String ID 419176]
+ 405     419177  Q                       [Unknown String ID 419177]
+ 406     419178  W                       [Unknown String ID 419178]
+ 407     419179  E                       [Unknown String ID 419179]
+ 408     419180  R                       [Unknown String ID 419180]
+ 409     419181  T                       [Unknown String ID 419181]
+ 410     419182  W                       [Unknown String ID 419182]
+ 411     419183  E                       [Unknown String ID 419183]
+ 412     419184  R                       [Unknown String ID 419184]
+ 413     419185  T                       [Unknown String ID 419185]
+ 414     419186  A                       [Unknown String ID 419186]
+ 415     419187  S                       [Unknown String ID 419187]
+ 416     419188  D                       [Unknown String ID 419188]
+ 417     419189  F                       [Unknown String ID 419189]
+ 418     419190  G                       [Unknown String ID 419190]
+ 419     419191  Z                       [Unknown String ID 419191]
+ 420     419192  Q                       [Unknown String ID 419192]
+ 421     419193  W                       [Unknown String ID 419193]
+ 422     419194  E                       [Unknown String ID 419194]
+ 423     419195  R                       [Unknown String ID 419195]
+ 424     419196  T                       [Unknown String ID 419196]
+ 425     419197  A                       [Unknown String ID 419197]
+ 426     419198  S                       [Unknown String ID 419198]
+ 427     419199  D                       [Unknown String ID 419199]
+ 428     419200  F                       [Unknown String ID 419200]
+ 429     419201  G                       [Unknown String ID 419201]
+ 430     419202  Z                       [Unknown String ID 419202]
+ 431     419203  X                       [Unknown String ID 419203]
+ 432     419204  C                       [Unknown String ID 419204]
+ 433     419205  V                       [Unknown String ID 419205]
+ 434     419206  W                       [Unknown String ID 419206]
+ 435     419207  A                       [Unknown String ID 419207]
+ 436     419208  S                       [Unknown String ID 419208]
+ 437     419209  D                       [Unknown String ID 419209]
+ 438     419210  F                       [Unknown String ID 419210]
+ 439     419211  Z                       [Unknown String ID 419211]
+ 440     419212  X                       [Unknown String ID 419212]
+ 441     419213  C                       [Unknown String ID 419213]
+ 442     419214  V                       [Unknown String ID 419214]
+ 443     419215  Q                       [Unknown String ID 419215]
+ 444     419221  E                       [Unknown String ID 419221]
+ 445     419222  D                       [Unknown String ID 419222]
+ 446     419220  E                       [Unknown String ID 419220]
+ 447     419223  X                       [Unknown String ID 419223]
+ 448     419224  C                       [Unknown String ID 419224]
+ 449     419225  V                       [Unknown String ID 419225]
+ 450     419226  B                       [Unknown String ID 419226]
+ 451     419227  Q                       [Unknown String ID 419227]
+ 452     419228  W                       [Unknown String ID 419228]
+ 453     419229  E                       [Unknown String ID 419229]
+ 454     419230  Q                       [Unknown String ID 419230]
+ 455     419231  W                       [Unknown String ID 419231]
+ 456     419232  E                       [Unknown String ID 419232]
+
+

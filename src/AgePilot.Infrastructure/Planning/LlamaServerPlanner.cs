@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgePilot.Core.Automation;
+using AgePilot.Core;
 using AgePilot.Core.Configuration;
 using AgePilot.Core.Planning;
 using AgePilot.Infrastructure.Diagnostics;
@@ -17,23 +18,26 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() },
     };
-    private readonly AppSettings _settings;
+    private AppSettings _settings;
     private readonly LocalJsonLineLogger? _logger;
-    private readonly HttpClient _http;
+    private HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Process? _process;
     private string? _backend;
     private string? _device;
+    private bool _startupAttempted;
+    private bool _restartRequired;
     private readonly Queue<string> _serverMessages = new();
     private PlannerRuntimeStatus _runtimeStatus = PlannerRuntimeStatus.NotConfigured();
 
     public PlannerRuntimeStatus RuntimeStatus => _runtimeStatus;
+    public string? LastRawResponse { get; private set; }
 
     public LlamaServerPlanner(AppSettings settings, LocalJsonLineLogger? logger = null)
     {
         _settings = settings;
         _logger = logger;
-        _http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{settings.LlmPort}/") };
+        _http = CreateHttpClient(settings.LlmPort);
     }
 
     public async Task<PlanningResult> PlanAsync(SituationContext context, CancellationToken cancellationToken)
@@ -72,13 +76,14 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     new { role = "system", content = SystemPrompt },
                     new { role = "user", content = userContent.ToArray() },
                 },
-                response_format = BuildResponseFormat(effectiveScope),
+                response_format = BuildResponseFormat(effectiveScope, AllowedActions(context.State)),
             };
             using var response = await _http.PostAsJsonAsync("v1/chat/completions", request, JsonOptions, timeout.Token);
             response.EnsureSuccessStatusCode();
             var envelope = await response.Content.ReadFromJsonAsync<CompletionEnvelope>(JsonOptions, timeout.Token)
                 ?? throw new InvalidDataException("模型回覆為空");
             var content = envelope.Choices.FirstOrDefault()?.Message.Content;
+            LastRawResponse = content;
             var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
                 ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
             var now = DateTimeOffset.UtcNow;
@@ -115,11 +120,29 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     private async Task EnsureStartedAsync(CancellationToken cancellationToken)
     {
-        if (_process is { HasExited: false } && await IsHealthyAsync(cancellationToken))
+        if (!_settings.EnableLocalPlanning)
         {
-            SetStatus(PlannerRuntimePhase.Ready, $"LLM 已就緒（{FormatBackend()}）", FormatBackend());
+            SetStatus(PlannerRuntimePhase.NotConfigured, "本機規劃已停用");
             return;
         }
+        if (_restartRequired)
+            throw new InvalidOperationException("llama-server 已停止；請在 Dashboard 按「重新啟動 LLM」");
+        if (_process is { HasExited: false })
+        {
+            if (await IsHealthyAsync(cancellationToken))
+            {
+                SetStatus(PlannerRuntimePhase.Ready, $"LLM 已就緒（{FormatBackend()}）", FormatBackend());
+                return;
+            }
+            MarkRestartRequired("llama-server 無回應；請在 Dashboard 按「重新啟動 LLM」");
+            throw new InvalidOperationException(_runtimeStatus.Message);
+        }
+        if (_startupAttempted)
+        {
+            MarkRestartRequired("llama-server 已意外結束；請在 Dashboard 按「重新啟動 LLM」");
+            throw new InvalidOperationException(_runtimeStatus.Message);
+        }
+        _startupAttempted = true;
         var model = Resolve(_settings.LlmModelPath);
         var mmproj = Resolve(_settings.VisionProjectorPath);
         var runtime = Resolve(_settings.LlamaRuntimePath);
@@ -134,6 +157,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             throw new FileNotFoundException("找不到本機 VLM mmproj", mmproj);
         }
         SetStatus(PlannerRuntimePhase.Starting, "正在啟動 llama-server");
+        _logger?.Write("llm.server.starting", new { _settings.LlmBackend, _settings.LlmPort });
         var backends = _settings.LlmBackend == "auto" ? new[] { "hip", "vulkan" } : new[] { _settings.LlmBackend };
         var failures = new List<string>();
         foreach (var backend in backends)
@@ -170,6 +194,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     if (await IsHealthyAsync(cancellationToken))
                     {
                         SetStatus(PlannerRuntimePhase.Ready, $"LLM 已就緒（{FormatBackend()}）", FormatBackend());
+                        _logger?.Write("llm.server.ready", new { backend = _backend, device = _device, processId = _process.Id });
                         return;
                     }
                     await Task.Delay(500, cancellationToken);
@@ -180,7 +205,9 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             StopProcess();
         }
         var failure = $"沒有可用的 llama.cpp backend：{string.Join("; ", failures)}";
+        _restartRequired = true;
         SetStatus(PlannerRuntimePhase.Error, failure);
+        _logger?.Write("llm.server.failed", new { failure });
         throw new InvalidOperationException(failure);
     }
 
@@ -235,12 +262,47 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     public async Task<PlannerRuntimeStatus> CheckReadyAsync(CancellationToken cancellationToken)
     {
-        try { await EnsureStartedAsync(cancellationToken); }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        await _gate.WaitAsync(cancellationToken);
+        try
         {
-            SetStatus(PlannerRuntimePhase.Error, ex.Message, _backend);
+            try { await EnsureStartedAsync(cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                SetStatus(PlannerRuntimePhase.Error, ex.Message, _backend);
+            }
+            return RuntimeStatus;
         }
-        return RuntimeStatus;
+        finally { _gate.Release(); }
+    }
+
+    public async Task<PlannerRuntimeStatus> RestartAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _logger?.Write("llm.server.restart_requested", new { settings.LlmBackend, settings.LlmPort });
+            StopProcess();
+            if (_settings.LlmPort != settings.LlmPort)
+            {
+                _http.Dispose();
+                _http = CreateHttpClient(settings.LlmPort);
+            }
+            _settings = settings;
+            _backend = null;
+            _device = null;
+            _startupAttempted = false;
+            _restartRequired = false;
+            LastRawResponse = null;
+            lock (_serverMessages) _serverMessages.Clear();
+            SetStatus(PlannerRuntimePhase.Starting, "正在重新啟動 llama-server");
+            try { await EnsureStartedAsync(cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                SetStatus(PlannerRuntimePhase.Error, ex.Message, _backend);
+            }
+            return RuntimeStatus;
+        }
+        finally { _gate.Release(); }
     }
 
     private async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
@@ -270,6 +332,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             food = Value(context.State.Food), wood = Value(context.State.Wood), gold = Value(context.State.Gold), stone = Value(context.State.Stone),
             population = Value(context.State.Population), populationCap = Value(context.State.PopulationCap),
         },
+        allowedActions = AllowedActions(context.State).Select(kind => kind.ToString()).ToArray(),
         history = context.History,
         map = context.Map?.IsUsable == true ? context.Map : null,
         previousPlan = context.PreviousPlan is null ? null : new
@@ -337,6 +400,16 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         _process?.Dispose(); _process = null;
     }
 
+    private void MarkRestartRequired(string message)
+    {
+        _restartRequired = true;
+        SetStatus(PlannerRuntimePhase.Error, message, FormatBackend());
+        _logger?.Write("llm.server.crashed", new { message, backend = _backend, device = _device });
+    }
+
+    private static HttpClient CreateHttpClient(int port) =>
+        new() { BaseAddress = new Uri($"http://127.0.0.1:{port}/") };
+
     private void RememberServerMessage(string? message)
     {
         if (string.IsNullOrWhiteSpace(message)) return;
@@ -359,7 +432,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         ? "backend 未確認"
         : string.IsNullOrWhiteSpace(_device) ? _backend.ToUpperInvariant() : $"{_backend.ToUpperInvariant()} / {_device}";
 
-    public void Dispose() { StopProcess(); _http.Dispose(); _gate.Dispose(); }
+    public void Dispose() { StopProcess(); _http.Dispose(); }
 
     private const string SystemPrompt = """
 /no_think
@@ -368,15 +441,17 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 你不操作滑鼠也不按鍵，不需要也不可以提供任何座標。你每輪只做一件事：從下列具名動作中選一個，系統會用寫死且測試過的程序去執行它。
 - Observe：畫面資訊不足，需要重新觀察。
 - Wait：情勢正確但還不到動作時機。
-- QueueVillager：在城鎮中心生產一名村民（需要 50 食物）。
-- AdvanceAge：升上下一個時代（黑暗→封建需 500 食物；封建→城堡需 800 食物與 200 黃金；城堡→帝王需 1000 食物與 800 黃金）。
-- GatherFood、GatherWood、GatherGold、BuildHouse：尚未開放，選了會被系統擋下，這一輪等於空轉。
+- QueueVillager：人口未滿且食物至少 50 時，在城鎮中心生產一名村民。
+- BuildHouse：人口剩餘空間不超過 2 且木材至少 25 時，選閒置村民建造房屋。
+- AdvanceAge、GatherFood、GatherWood、GatherGold：本階段尚未開放，選了會被系統擋下，這一輪等於空轉。
+
+當人口剩餘空間不超過 2 時優先 BuildHouse；否則食物足夠時選 QueueVillager。不要用 Observe 或 Wait 取代一個前置條件已滿足的動作。
 
 資源不足、OCR 讀值不可靠或動作尚未開放時，系統會擋下該動作，因此請依 context 提供的資源數值判斷是否負擔得起再選。
 
 expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值驗證的直接後果，例如「食物減少 50」「時代欄位改變」。不可以寫「升上城堡時代」「人口增加 10」這種需要數十秒到數分鐘、跨多個動作才會發生的策略結果——系統是用 HUD 數值變化來確認動作是否被遊戲接受的。
 
-前一動作的結果由系統依 OCR 自行判定，不會問你，你也不需要回報。panorama 是完整遊戲畫面，command_panel 是左下指令面板，minimap 是右下小地圖，用它們理解局勢即可。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。所有文字欄位都要精簡，assessment 不超過 300 字。不要輸出 Markdown，嚴格依 JSON schema 回覆。
+前一動作的結果由系統依 OCR 自行判定，不會問你，你也不需要回報。panorama 是完整遊戲畫面，command_panel 是左下指令面板，minimap 是右下小地圖，用它們理解局勢即可。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。你只能選 context.allowedActions 與 JSON schema 同時允許的動作。所有文字欄位都要精簡，assessment 不超過 300 字。不要輸出 Markdown，嚴格依 JSON schema 回覆。
 """;
 
     private static object DecisionNodeSchema() => new Dictionary<string, object>
@@ -401,20 +476,23 @@ expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值
     /// 2026-08-13 的實機日誌顯示模型產出的座標是幻覺（0.05,0.1 連點 4 次且點在不可選取的樹上）。
     /// 定位改由 GameActionRegistry 的程序負責。
     /// </summary>
-    private static object ActionSchema() => new Dictionary<string, object>
+    private static object ActionSchema(IReadOnlyList<GameActionKind> allowedActions) => new Dictionary<string, object>
     {
         ["type"] = "object",
         ["additionalProperties"] = false,
         ["required"] = new[] { "kind", "reason", "quantity" },
         ["properties"] = new Dictionary<string, object>
         {
-            ["kind"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<GameActionKind>() },
+            ["kind"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = allowedActions.Select(kind => kind.ToString()).ToArray() },
             ["reason"] = new { type = "string", maxLength = 200 },
             ["quantity"] = new { type = "integer", minimum = 1, maximum = 10 },
         },
     };
 
-    public static object BuildResponseFormat(PlanUpdateScope scope)
+    public static object BuildResponseFormat(PlanUpdateScope scope) =>
+        BuildResponseFormat(scope, Enum.GetValues<GameActionKind>());
+
+    public static object BuildResponseFormat(PlanUpdateScope scope, IReadOnlyList<GameActionKind> allowedActions)
     {
         // action 排在最前面：strict json_schema 會依 properties 順序生成，先決定動作再寫論述，
         // 避免舊版那種「寫完數百字才擠出決定」的行為。
@@ -428,7 +506,7 @@ expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值
         };
         var properties = new Dictionary<string, object>
         {
-            ["action"] = ActionSchema(),
+            ["action"] = ActionSchema(allowedActions),
             ["expectedResult"] = new { type = "string", maxLength = 150 },
             ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
             ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
@@ -457,6 +535,24 @@ expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值
                 },
             },
         };
+    }
+
+    public static IReadOnlyList<GameActionKind> AllowedActions(GameState state)
+    {
+        var allowed = new List<GameActionKind> { GameActionKind.Observe, GameActionKind.Wait };
+        if (state.Population?.IsUsable != true || state.PopulationCap?.IsUsable != true) return allowed;
+
+        var remaining = state.PopulationCap.Value.GetValueOrDefault() - state.Population.Value.GetValueOrDefault();
+        if (remaining <= 2)
+        {
+            if (state.Wood?.IsUsable == true && state.Wood.Value.GetValueOrDefault() >= 25)
+                allowed.Add(GameActionKind.BuildHouse);
+            return allowed;
+        }
+
+        if (state.Food?.IsUsable == true && state.Food.Value.GetValueOrDefault() >= 50)
+            allowed.Add(GameActionKind.QueueVillager);
+        return allowed;
     }
 
     private sealed record CompletionEnvelope(IReadOnlyList<CompletionChoice> Choices);

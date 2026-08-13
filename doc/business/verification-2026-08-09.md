@@ -1,18 +1,17 @@
 # AgePilot 驗證紀錄 — 2026-08-09
 
-## 自動驗證
+## 歷史自動診斷（不作目前實機驗收）
 
 執行環境可見 12 個 logical processors。命令與結果：
 
 ```text
 dotnet build AgePilot.sln --no-restore
 結果：成功，0 warnings，0 errors
-
-dotnet run --no-build --project tests/AgePilot.Tests
-結果：34/34 passed
 ```
 
-測試涵蓋 ROI 映射、Profile、解析器、四張實際 Screenshot OCR、Vision 指標、暫停辨識、Adaptive ROI cache、生命週期、Temporal confirmation、Farmer Rules、Recommendation lifecycle、設定、JSONL 日誌、SQLite round-trip、品牌 ICO、自動操作熱鍵／序列／經濟條件、通用經濟規劃與世界候選分析。
+`AgePilot.Tests` 用於確定性 OCR、快取、Gate 與規劃回歸；它不能證明 App 已在遊戲端實際完成操作。實機行為仍須由使用者操作對局驗收。
+
+2026-08-13 回歸結果為 10/10：包含 OCR 失敗下一幀重試、67.2% 人口成對確認、矛盾候選維持 unavailable、人口 Gate、房屋壓力重規劃、LLM 動作白名單、Live Trace 移除、舊設定清理及四張 Screenshot manifest OCR ground truth。
 
 ## Vision Benchmark
 
@@ -53,7 +52,7 @@ Replay 刻意不等待、持續以最大吞吐處理，且記憶體中同時保�
 - GUI smoke：啟動 Overlay 後 Dashboard 為 off-screen，AgePilot 程序與 Overlay 持續運作。
 - 老鷹品牌圖示已內嵌至 EXE、WPF 視窗與系統匣；發佈版 EXE 可讀取 32×32 shell icon，來源 ICO 含 16、24、32、48、64、128、256 px。
 - 自動模式預設關閉，Overlay 顯示狀態與切換按鈕；可自訂開啟／緊急停止熱鍵與經濟／軍事序列。輸入層會在 AOE2 非前景時 fail closed。
-- 自動操作回歸涵蓋 `19/20` 仍允許一名村民、`20/20` 停止；另完成同人口防重複排隊、輸入例外隔離、停止熱鍵優先註冊與權限錯誤提示稽核。
+- 自動操作回歸不能證明遊戲端實際作動。現行驗收由使用者操作實際對局，確認遊戲畫面結果，並以一般診斷日誌中的 LLM 決策、`automation.sent`、OCR 前後值與 `automation.confirmed` 對照；程式不保存遊戲畫面。
 
 最終可攜版：
 

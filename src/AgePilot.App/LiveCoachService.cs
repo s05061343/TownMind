@@ -22,15 +22,16 @@ public sealed class LiveCoachService(
     AppSettings settings,
     int scanIntervalMilliseconds = 500,
     ISessionRepository? sessionRepository = null,
-    LocalJsonLineLogger? logger = null) : IDisposable
+    LocalJsonLineLogger? logger = null,
+    LlamaServerPlanner? sharedPlanner = null) : IDisposable
 {
     private readonly WindowsGameWindowLocator _locator = new();
     private readonly WindowsGdiFrameCapture _capture = new();
     private readonly PaddleNumericOcrEngine _ocr = new();
     private readonly TemporalGameStateEstimator _estimator = new();
     private readonly GameHistory _history = new();
-    private readonly StrategyEngine _strategy = new(new LlamaServerPlanner(settings, logger),
-        new StrategyDirective("穩定發展經濟並升至玩家指定時代", settings.TargetAge));
+    private readonly StrategyEngine _strategy = new(sharedPlanner ?? new LlamaServerPlanner(settings, logger),
+        new StrategyDirective("穩定發展經濟並升至玩家指定時代", settings.TargetAge), ownsPlanner: sharedPlanner is null);
     private readonly RecommendationCoordinator _recommendationCoordinator = new();
     private readonly GameLifecycleTracker _lifecycle = new();
     private readonly MinimapAnalyzer _minimapAnalyzer = new();
@@ -44,6 +45,7 @@ public sealed class LiveCoachService(
     private string _lastLoggedRecommendations = string.Empty;
     private string? _previousVisualAction;
     private string? _previousVisualResult;
+    private string? _lastPopulationDiagnostic;
 
     public async Task RunAsync(
         Func<LiveCoachUpdate, Task> onUpdate,
@@ -90,12 +92,13 @@ public sealed class LiveCoachService(
                             continue;
                         }
                         var state = _estimator.Update(raw, frame.CapturedAt);
+                        LogPopulationOcr(raw, state);
                         var map = _minimapAnalyzer.Analyze(frame.BgraPixels.Span, frame.Width, frame.Height, _profile.MinimapRegion, frame.CapturedAt);
                         var visual = new VisualObservation(frame.Width, frame.Height,
                             VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
                                 _profile.CommandPanelRegion ?? new NormalizedRect(0, 0.66, 0.47, 0.34),
                                 _profile.MinimapRegion ?? new NormalizedRect(0.80, 0.67, 0.20, 0.33)),
-                            $"panorama=完整遊戲視窗；資源數值已由 OCR 以文字提供，不再附圖；command_panel=左下指令；minimap=右下小地圖；所有遊戲輸入僅限滑鼠；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}；世界座標以 panorama normalized [0,1] 表示",
+                            $"panorama=完整遊戲視窗；資源數值已由 OCR 以文字提供，不再附圖；command_panel=左下指令；minimap=右下小地圖；執行層使用已確認的遊戲快捷鍵與固定安全落點；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}",
                             _previousVisualAction, _previousVisualResult);
                         _history.Add(state, frame.CapturedAt);
                         var health = CalculateVisionHealth(state);
@@ -114,7 +117,7 @@ public sealed class LiveCoachService(
                         await onUpdate(new LiveCoachUpdate(true, status, lifecycle, state,
                             lifecycle == GameLifecycleState.GameActive ? visibleRecommendations : [],
                             health.Confidence, health.UnavailableFields, DateTimeOffset.UtcNow - cycleStartedAt,
-                            map, planning.Plan, planning.Status, _strategy.RuntimeStatus));
+                            map, planning.Plan, planning.Status, _strategy.RuntimeStatus, frame));
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -194,6 +197,25 @@ public sealed class LiveCoachService(
         logger?.Write("recommendations.changed", new { ids = recommendations.Select(item => item.Id).ToArray() });
     }
 
+    private void LogPopulationOcr(HudOcrResult raw, GameState state)
+    {
+        var observation = raw.Fields[HudField.Population];
+        var outcome = _adaptiveOcr?.LastCacheOutcomes.FirstOrDefault(item => item.Key == HudField.Population.ToString());
+        var usable = state.Population?.IsUsable == true && state.PopulationCap?.IsUsable == true;
+        var signature = $"{observation.RawText}|{observation.Confidence:F3}|{raw.Population}|{usable}|{outcome?.Reason}";
+        if (signature == _lastPopulationDiagnostic) return;
+        _lastPopulationDiagnostic = signature;
+        logger?.Write(usable ? "ocr.population.confirmed" : "ocr.population.unavailable", new
+        {
+            rawText = observation.RawText,
+            observation.Confidence,
+            parsedCurrent = raw.Population?.Current,
+            parsedCap = raw.Population?.Cap,
+            cacheReason = outcome?.Reason ?? "cached-observation",
+            consistentCount = outcome?.ConsistentCount ?? 0,
+        });
+    }
+
     private static string FormatAge(GameAge? age) => age switch
     {
         GameAge.Dark => "黑暗時代",
@@ -251,7 +273,8 @@ public sealed record LiveCoachUpdate(
     MapContext? Map = null,
     GamePlan? Plan = null,
     string? PlanningStatus = null,
-    PlannerRuntimeStatus? LlmStatus = null)
+    PlannerRuntimeStatus? LlmStatus = null,
+    CapturedFrame? Frame = null)
 {
     public static LiveCoachUpdate Disconnected(GameLifecycleState lifecycle, string status) =>
         new(false, status, lifecycle, null, [], 0, 6, TimeSpan.Zero);

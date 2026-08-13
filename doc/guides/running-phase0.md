@@ -8,9 +8,11 @@ Portable 套件不包含約 5 GB 的 GGUF 模型或 llama.cpp runtime。第一�
 - GGUF 主模型：`Qwen3VL-8B-Instruct-Q4_K_M.gguf`。
 - 視覺編碼器：`mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf`。
 
-按「測試 LLM」後，狀態顯示「已就緒」才代表 backend、模型與圖片理解成功。自動操作預設為預演；只有使用者在 Overlay 明確啟用後才會送出遊戲輸入。
+AgePilot 啟動後會立即在背景啟動唯一一個 `llama-server` 並載入模型，狀態變成「已就緒」前不提供規劃。該 server 會由 Dashboard、Overlay 與「實測 LLM」共用，關閉 Overlay 或完成推論不會關閉；只有從系統匣真正結束 AgePilot 才會停止。若 server 意外退出或 health 失敗，AgePilot 會顯示錯誤且不自動重啟；請按「重新啟動 LLM」明確重新載入。runtime 或模型路徑變更也以此按鈕套用。
 
-Dashboard 可選擇最終目標時代（封建／城堡／帝王，預設城堡）。每次啟動 AgePilot 後還必須在 AOE2 已開啟時按「測試滑鼠」；游標會短暫移動並回到原位，全程不點擊。只有移動與恢復座標都經 Win32 讀回確認後，Overlay 才允許啟用自動操作。AOE2 視窗重開後必須重新測試。
+按「實測 LLM」會擷取目前 AOE2 畫面並使用 Overlay 同一個 Planner 真正推論一次；Dashboard 會顯示 backend、Plan ID、三層判斷、動作、信心與原始 JSON。這顆按鈕不會操作遊戲。自動操作預設為預演；只有使用者在 Overlay 明確啟用後才會送出遊戲輸入。
+
+Dashboard 可選擇最終目標時代（封建／城堡／帝王，預設城堡）。Overlay 第一次按「啟用」時會自動執行滑鼠移動與恢復座標測試，全程不點擊；讀回成功才會切換為「停止」。AOE2 視窗重開後會在下次啟用時重新測試。
 
 HIP 狀態必須顯示實際裝置，例如 `HIP / ROCm0`。若只載入 CPU backend，AgePilot 會拒絕啟動規劃；請確認 AMD ROCm 已安裝，且其 `bin` 目錄包含 `amdhip64_7.dll`。
 
@@ -46,7 +48,7 @@ Dashboard 可保存 HUD Profile、Overlay 透明度與掃描間隔，並直接�
 
 「儲存本機對局紀錄」可隨時關閉。診斷匯出只有按下「匯出診斷」並選定檔案後才會建立 JSON；內容不含 Screenshot、按鍵內容或帳號名稱。
 
-「儲存本機診斷事件」可控制 `%LocalAppData%\AgePilot\logs\agepilot.jsonl`。日誌包含 PID、執行緒、生命週期、規劃、自動操作與全域例外；單檔達 5 MB 後輪替一次，不保存 Screenshot。若主檔因權限或 I/O 問題無法寫入，改寫同目錄的 `agepilot-emergency.log`。
+「儲存本機診斷事件」控制 `%LocalAppData%\AgePilot\logs\agepilot.jsonl`。人口辨識不可用或恢復時會記錄原始文字、信心、解析值與拒絕原因；日誌不含遊戲畫面。AgePilot 不提供 Live Trace 或動作前後截圖保存功能。
 
 ## 執行可攜版
 
@@ -116,13 +118,13 @@ dotnet run --no-build --project src\AgePilot.App -- scan-live `
 
 這個命令會偵測 AOE2 視窗、擷取一幀並輸出資源與人口。現階段校正環境是 2560×1440、全螢幕、繁中、HUD 50%。
 
-## 執行測試
+## 執行回歸測試
 
 ```powershell
-dotnet run --no-build --project tests\AgePilot.Tests
+dotnet run --project tests\AgePilot.Tests
 ```
 
-測試包含四張參考／實機／暫停畫面的真實 PaddleOCR 回歸。
+測試涵蓋 OCR 失敗重試、中等信心人口成對確認、人口安全 Gate、房屋壓力重規劃與 LLM 動作白名單。這些測試只驗證確定性程式行為，不代表遊戲端輸入已完成實機驗收。
 
 ## 產生 Vision 與 Replay 報告
 
@@ -137,7 +139,7 @@ dotnet run --no-build --project src\AgePilot.App -- live-benchmark `
   "config\hud\aoe2de-zh-tw-2560x1440-50.json" "artifacts\reports\live-benchmark.json" 300
 ```
 
-第一個命令量測欄位／整幀正確率、高信心錯誤率、Unavailable rate、建議一致率與錯誤建議率。第二個命令以 manifest 重複回放完整 Vision → Temporal GameState → Rules pipeline，輸出 failure、CPU、記憶體、延遲與暫停抑制數。
+第一個命令量測固定截圖的 OCR／狀態指標；第二個命令重複回放固定畫面並輸出 failure、CPU、記憶體與延遲。兩者都是獨立 CLI 人工診斷工具，不是 App 正常運行路徑，也不能證明 LLM 或遊戲自動操作可用。
 
 第三個命令必須在 AOE2 DE 對局視窗存在時執行，範例會量測五分鐘 Live Capture。遊戲不存在時會以 exit code 2 fail closed，不會建立假的成功報告。遊戲 FPS 仍需由遊戲內或外部效能工具同時記錄 baseline 與 AgePilot 開啟後的差異。
 

@@ -6,8 +6,8 @@
 - [x] Farmer Mode 確定性規則、priority、dismiss-until-resolved。
 - [x] Compact Overlay、拖曳、關閉、滑鼠穿透與快捷鍵。
 - [x] System Tray 常駐、關閉／最小化隱藏、Overlay 啟動後自動收合及 Tray-only Exit。
-- [x] 使用者控制的純滑鼠經濟操作、Overlay 狀態按鈕、可自訂應用程式啟停熱鍵與緊急停止；遊戲內不發送鍵盤輸入。
-- [x] Dashboard 設定、遊戲連線、Live diagnostics 與最近對局。
+- [ ] 使用者控制的村民／房屋閉環已實作，仍須由使用者實際操作並在一般診斷日誌出現 `automation.confirmed` 才可勾選完成。
+- [x] Dashboard 設定、真實 LLM 回答檢視、容量受控的文字診斷與最近對局；不保存遊戲畫面。
 - [x] 可停用的 SQLite Session／Snapshot／Recommendation event。
 - [x] 使用者主動 JSON 診斷匯出；不含 Screenshot 或帳號資訊。
 - [x] Privacy、Disclaimer、第三方授權與執行指南。

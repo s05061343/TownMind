@@ -9,6 +9,7 @@ using AgePilot.Core.Configuration;
 using System.Windows.Media;
 using AgePilot.Core.Automation;
 using AgePilot.Core.Planning;
+using AgePilot.Infrastructure.Planning;
 
 namespace AgePilot.App;
 
@@ -45,12 +46,13 @@ public partial class OverlayWindow : Window
         AppSettings settings,
         MouseCapabilitySession mouseCapability,
         ISessionRepository? sessionRepository = null,
-        LocalJsonLineLogger? logger = null)
+        LocalJsonLineLogger? logger = null,
+        LlamaServerPlanner? sharedPlanner = null)
     {
         InitializeComponent();
         _settings = settings;
         _logger = logger;
-        _coach = new LiveCoachService(profilePath, settings, settings.ScanIntervalMilliseconds, sessionRepository, logger);
+        _coach = new LiveCoachService(profilePath, settings, settings.ScanIntervalMilliseconds, sessionRepository, logger, sharedPlanner);
         _automation = new AutomationController(settings, mouseCapability, logger);
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
