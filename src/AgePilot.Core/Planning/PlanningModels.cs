@@ -1,3 +1,4 @@
+using AgePilot.Core.Automation;
 using AgePilot.Core.History;
 using AgePilot.Core.Observations;
 
@@ -97,15 +98,18 @@ public sealed record VisualToolAction(
     int Row = 0,
     int Column = 0);
 
+/// <summary>
+/// 模型單輪的決定。依 ADR 0015，Action 是具名的 <see cref="GameAction"/>，模型不再輸出座標；
+/// 前一動作的結果也不再由模型回報，改由 <see cref="Automation.ActionOutcomeVerifier"/> 依 OCR 判定。
+/// </summary>
 public sealed record VisualPlayerDecision(
     string Assessment,
     string Goal,
     string Reason,
-    VisualToolAction Action,
+    GameAction Action,
     string ExpectedResult,
     int RecheckAfterMs,
-    double Confidence,
-    PreviousActionResult PreviousActionResult = PreviousActionResult.NotApplicable);
+    double Confidence);
 
 public sealed record GamePlan(
     string PlanId,

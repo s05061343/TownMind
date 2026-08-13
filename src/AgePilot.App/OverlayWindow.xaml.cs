@@ -124,14 +124,7 @@ public partial class OverlayWindow : Window
 
     private static string Format(int? value) => value?.ToString() ?? "—";
 
-    private static string Describe(VisualToolAction action) => action.Tool switch
-    {
-        VisualToolKind.LeftClick when action.Space == VisualCoordinateSpace.CommandGrid => $"左鍵命令格位 {action.Row},{action.Column}（{action.Target}）",
-        VisualToolKind.LeftClick => $"左鍵 {action.Space} {action.X:P0},{action.Y:P0}（{action.Target}）",
-        VisualToolKind.RightClick => $"右鍵 {action.X:P0},{action.Y:P0}",
-        VisualToolKind.Drag => $"拖曳 {action.X:P0},{action.Y:P0} → {action.EndX:P0},{action.EndY:P0}",
-        _ => action.Tool.ToString(),
-    };
+    private static string Describe(GameAction action) => AutomationController.Describe(action);
 
     private void OnDragWindow(object sender, MouseButtonEventArgs e)
     {

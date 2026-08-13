@@ -7,10 +7,22 @@ using AgePilot.Vision.Profiles;
 
 namespace AgePilot.App;
 
-internal sealed class AutomationController(AppSettings settings, MouseCapabilitySession mouseCapability, LocalJsonLineLogger? logger = null)
+/// <summary>
+/// 消費 LLM 選定的具名動作，交由 <see cref="GameActionRegistry"/> 的程序執行，
+/// 並以 <see cref="ActionOutcomeVerifier"/> 依 OCR 判定結果（ADR 0015）。
+///
+/// 舊版讓 VLM 自行回報前一動作是否成功，2026-08-13 三場實機 session 共 18 次決策中
+/// 沒有任何一次回傳 Confirmed，導致每個動作都累積失敗、三次後自動停用。確認權因此移交本層。
+/// </summary>
+internal sealed class AutomationController
 {
+    private readonly AppSettings _settings;
+    private readonly MouseCapabilitySession _mouseCapability;
+    private readonly LocalJsonLineLogger? _logger;
     private readonly WindowsInputSender _input = new();
-    private readonly HudProfile _profile = HudProfileLoader.Load(settings.HudProfilePath);
+    private readonly HudProfile _profile;
+    private readonly GameHotKeyBindings _bindings;
+    private readonly string? _bindingsError;
     private readonly HashSet<string> _sentPlans = [];
     private readonly Queue<DateTimeOffset> _recentActions = [];
     private PendingAction? _pending;
@@ -19,6 +31,26 @@ internal sealed class AutomationController(AppSettings settings, MouseCapability
     private string? _lastFailedPlanId;
     private string? _lastLoggedPlanId;
 
+    public AutomationController(AppSettings settings, MouseCapabilitySession mouseCapability, LocalJsonLineLogger? logger = null)
+    {
+        _settings = settings;
+        _mouseCapability = mouseCapability;
+        _logger = logger;
+        _profile = HudProfileLoader.Load(settings.HudProfilePath);
+        try
+        {
+            _bindings = GameHotKeyBindingsLoader.Load(settings.GameHotKeyProfilePath);
+            _bindingsError = null;
+        }
+        catch (Exception exception)
+        {
+            // 綁定載入失敗不可讓整個 App 起不來；改為讓所有需要按鍵的動作 fail closed。
+            _bindings = GameHotKeyBindings.Empty();
+            _bindingsError = exception.Message;
+            logger?.Write("automation.bindings_unavailable", new { path = settings.GameHotKeyProfilePath, error = exception.Message });
+        }
+    }
+
     public bool IsEnabled { get; private set; }
     public bool HasPendingAction => _pending is not null;
     public string LastStatus { get; private set; } = "預演模式，不送出輸入";
@@ -26,155 +58,178 @@ internal sealed class AutomationController(AppSettings settings, MouseCapability
 
     public bool Enable(bool requireDashboardPermission = true)
     {
-        if (requireDashboardPermission && !settings.EnableAutomationInput)
+        if (requireDashboardPermission && !_settings.EnableAutomationInput)
         { LastStatus = "Dashboard 尚未授權全域啟用"; return false; }
-        if (!mouseCapability.IsValidFor(_input.CurrentGameWindowHandle))
+        if (!_mouseCapability.IsValidFor(_input.CurrentGameWindowHandle))
         { LastStatus = "尚未通過本次程式的滑鼠實機測試，或 AOE2 視窗已更換"; return false; }
         if (_profile.MinimapRegion is null || _profile.CommandGridRegion is null)
         { LastStatus = "HUD profile 缺少小地圖或命令面板格位校準"; return false; }
+        if (!KeyboardReady(out var keyboardReason))
+        { LastStatus = keyboardReason; return false; }
         IsEnabled = true; _consecutiveFailures = 0; _pending = null;
-        LastStatus = "已啟用，等待 VLM 安全動作";
-        logger?.Write("automation.enabled", new { source = "Qwen3-VL" });
+        LastStatus = "已啟用，等待 LLM 選擇動作";
+        _logger?.Write("automation.enabled", new { source = "Qwen3-VL", bindings = _bindings.Id });
         return true;
     }
 
     public void Disable(string reason = "自動操作已停止")
     {
         IsEnabled = false; _pending = null; LastStatus = reason;
-        logger?.Write("automation.disabled", new { reason });
+        _logger?.Write("automation.disabled", new { reason });
     }
 
     public void Toggle(bool requireDashboardPermission = true)
     { if (IsEnabled) Disable(); else Enable(requireDashboardPermission); }
 
+    /// <summary>
+    /// 遊戲按鍵的授權檢查。依 ADR 0015，使用者必須明確開啟設定，且快捷鍵設定檔必須已由使用者確認過
+    /// （verified=true）。未確認的預設綁定不得用來送出輸入。
+    /// </summary>
+    private bool KeyboardReady(out string reason)
+    {
+        if (!_settings.EnableGameKeyboardInput)
+        { reason = "尚未開啟遊戲鍵盤輸入（EnableGameKeyboardInput）"; return false; }
+        if (_bindingsError is not null)
+        { reason = $"遊戲快捷鍵設定無法載入：{_bindingsError}"; return false; }
+        if (!_bindings.Verified)
+        { reason = $"快捷鍵設定 {_bindings.Id} 尚未經使用者確認（verified=false）"; return false; }
+        reason = "";
+        return true;
+    }
+
     public void Handle(LiveCoachUpdate update, DateTimeOffset now)
     {
         var plan = update.Plan;
         var decision = plan?.VisualDecision;
-        if (!IsEnabled) { LastStatus = decision is null ? "預演：等待 VLM 決策" : $"預演：{Describe(decision.Action)}"; return; }
+        if (!IsEnabled) { LastStatus = decision is null ? "預演：等待 LLM 決策" : $"預演：{Describe(decision.Action)}"; return; }
         if (!update.IsConnected || update.Lifecycle == GameLifecycleState.GameEnded)
         { Disable("遊戲已離線或結束，已自動停止"); return; }
         if (update.Lifecycle != GameLifecycleState.GameActive)
         { LastStatus = "已啟用；等待穩定的 Active 遊戲畫面"; return; }
+
+        // pending 的驗證不依賴新計畫：OCR 每 tick 都在更新，動作結果隨時可能確認。
+        if (_pending is not null) { HandlePending(update, plan, now); return; }
+
         if (decision is null || plan is null)
-        { LastStatus = update.LlmStatus?.Phase == PlannerRuntimePhase.Planning ? "已啟用；VLM 規劃中" : "已啟用；等待 VLM 決策"; return; }
+        { LastStatus = update.LlmStatus?.Phase == PlannerRuntimePhase.Planning ? "已啟用；LLM 規劃中" : "已啟用；等待 LLM 決策"; return; }
 
         if (_lastLoggedPlanId != plan.PlanId)
         {
             _lastLoggedPlanId = plan.PlanId;
-            logger?.Write("automation.decision", new { plan.PlanId, decision.Confidence, decision.Action.Tool,
-                decision.Action.Space, decision.Action.Target, decision.Action.X, decision.Action.Y,
-                decision.Action.Row, decision.Action.Column, decision.PreviousActionResult });
-        }
-
-        if (_pending is not null)
-        {
-            if (now < _pending.NotBefore) { LastStatus = $"等待確認：{_pending.Description}"; return; }
-            if (!_pending.RequiresConfirmation)
-            {
-                LastPlanningEvent = new("visual_wait_elapsed", $"重新觀察：{_pending.Description}", now,
-                    PlanUpdateScope.Minor, plan.MinorDecision?.NodeId);
-                LastStatus = $"等待完成，重新觀察：{_pending.Description}";
-                _pending = null;
-                return;
-            }
-            if (!_pending.RecheckRequested)
-            {
-                _pending.RecheckRequested = true;
-                LastPlanningEvent = new("visual_action_recheck_due", $"重新觀察：{_pending.Description}", now,
-                    PlanUpdateScope.Minor, plan.MinorDecision?.NodeId);
-                LastStatus = $"正在確認：{_pending.Description}";
-                return;
-            }
-            if (decision.PreviousActionResult == PreviousActionResult.Confirmed)
-            { CompletePending("VLM 已確認遊戲結果", now, plan); return; }
-            if (decision.PreviousActionResult == PreviousActionResult.Failed || now >= _pending.Deadline)
-            { FailOnce(plan.PlanId, decision.PreviousActionResult == PreviousActionResult.Failed ? "VLM 確認動作失敗" : "等待遊戲結果逾時", now, PlanUpdateScope.Minor, plan.MinorDecision?.NodeId); _pending = null; return; }
-            if (decision.PreviousActionResult == PreviousActionResult.Uncertain)
-            { FailOnce(plan.PlanId, "VLM 無法確認前一動作", now, PlanUpdateScope.Minor, plan.MinorDecision?.NodeId); return; }
-            LastStatus = "等待 VLM 確認前一動作"; return;
+            _logger?.Write("automation.decision", new { plan.PlanId, decision.Confidence,
+                kind = decision.Action.Kind.ToString(), decision.Action.Quantity, decision.ExpectedResult });
         }
 
         if (plan.ExpiresAt <= now || decision.Confidence < 0.8)
-        { FailOnce(plan.PlanId, "VLM 決策過期或信心不足", now, PlanUpdateScope.Minor, plan.MinorDecision?.NodeId); return; }
+        { FailOnce(plan.PlanId, "LLM 決策過期或信心不足", now, plan.MinorDecision?.NodeId); return; }
         if (_sentPlans.Contains(plan.PlanId) || now - _lastActionAt < TimeSpan.FromMilliseconds(500)) return;
         while (_recentActions.TryPeek(out var at) && now - at > TimeSpan.FromMinutes(1)) _recentActions.Dequeue();
-        if (_recentActions.Count >= 30) { FailOnce(plan.PlanId, "每分鐘原子操作上限已達", now, PlanUpdateScope.Minor, plan.MinorDecision?.NodeId); return; }
-        if (!Safe(decision.Action, out var reason)) { FailOnce(plan.PlanId, reason, now, PlanUpdateScope.Minor, plan.MinorDecision?.NodeId); return; }
-        if (decision.Action.Tool is VisualToolKind.Observe or VisualToolKind.Wait)
+        if (_recentActions.Count >= 30)
+        { FailOnce(plan.PlanId, "每分鐘原子操作上限已達", now, plan.MinorDecision?.NodeId); return; }
+
+        if (decision.Action.Kind is GameActionKind.Observe or GameActionKind.Wait)
         {
             _sentPlans.Add(plan.PlanId);
-            LastStatus = decision.Action.Tool == VisualToolKind.Wait ? $"VLM 決定等待：{decision.Reason}" : $"VLM 決定重新觀察：{decision.Reason}";
-            logger?.Write("automation.waiting", new { plan.PlanId, decision.Action.Tool, decision.Reason, decision.Assessment });
+            LastStatus = decision.Action.Kind == GameActionKind.Wait
+                ? $"LLM 決定等待：{decision.Reason}" : $"LLM 決定重新觀察：{decision.Reason}";
+            _logger?.Write("automation.waiting", new { plan.PlanId, kind = decision.Action.Kind.ToString(),
+                decision.Reason, decision.Assessment });
             var waitDelay = TimeSpan.FromMilliseconds(Math.Clamp(decision.RecheckAfterMs, 250, 30000));
-            _pending = new PendingAction(Describe(decision.Action), now + waitDelay, now + waitDelay + TimeSpan.FromSeconds(30), false);
+            _pending = new(Describe(decision.Action), plan.PlanId, null, now + waitDelay, now + waitDelay);
             return;
         }
 
-        var sent = _input.TryExecute(decision.Action, _profile.MinimapRegion!.Value, _profile.CommandGridRegion!.Value,
+        if (!GameActionRegistry.TryResolve(decision.Action.Kind, _bindings, update.State, update.State?.Age,
+                out var procedure, out var blockedReason))
+        { FailOnce(plan.PlanId, blockedReason, now, plan.MinorDecision?.NodeId); return; }
+
+        if (procedure.Steps.Any(step => step.Kind == ProcedureStepKind.GameKey) && !KeyboardReady(out var keyboardReason))
+        { FailOnce(plan.PlanId, keyboardReason, now, plan.MinorDecision?.NodeId); return; }
+
+        var sent = _input.TryExecuteProcedure(procedure, _profile.MinimapRegion!.Value, _profile.CommandGridRegion!.Value,
             _profile.CommandGridRows, _profile.CommandGridColumns, out var inputStatus);
-        if (!sent) { FailOnce(plan.PlanId, inputStatus, now, PlanUpdateScope.Minor, plan.MinorDecision?.NodeId); return; }
+        if (!sent) { FailOnce(plan.PlanId, inputStatus, now, plan.MinorDecision?.NodeId); return; }
 
         _sentPlans.Add(plan.PlanId); _recentActions.Enqueue(now); _lastActionAt = now; _consecutiveFailures = 0;
-        var delay = TimeSpan.FromMilliseconds(Math.Clamp(decision.RecheckAfterMs, 250, 30000));
-        _pending = new(Describe(decision.Action), now + delay, now + delay + TimeSpan.FromSeconds(30));
-        LastStatus = $"已執行：{_pending.Description}；等待 VLM 確認";
-        LastPlanningEvent = new("visual_action_sent", $"{_pending.Description}；預期：{decision.ExpectedResult}", now,
+        var baseline = new ActionOutcomeBaseline(procedure.Kind, procedure.Post, update.State ?? new GameState(),
+            now, now + procedure.Timeout);
+        _pending = new(procedure.Description, plan.PlanId, baseline, now, now + procedure.Timeout);
+        LastStatus = $"已執行：{procedure.Description}；等待 HUD 數值確認";
+        LastPlanningEvent = new("visual_action_sent", $"{procedure.Description}；預期：{decision.ExpectedResult}", now,
             PlanUpdateScope.Minor, plan.MinorDecision?.NodeId);
-        logger?.Write("automation.sent", new { plan.PlanId, decision.Action.Tool, decision.Action.Space,
-            decision.Action.Target, decision.Action.X, decision.Action.Y, decision.Action.Row, decision.Action.Column,
-            inputStatus, decision.ExpectedResult });
+        _logger?.Write("automation.sent", new { plan.PlanId, kind = procedure.Kind.ToString(),
+            procedure.Description, inputStatus, postcondition = procedure.Post.Kind.ToString(),
+            resource = procedure.Post.Resource?.ToString(), procedure.Post.Amount, decision.ExpectedResult });
+    }
+
+    private void HandlePending(LiveCoachUpdate update, GamePlan? plan, DateTimeOffset now)
+    {
+        var pending = _pending!;
+        var nodeId = plan?.MinorDecision?.NodeId;
+
+        // Observe／Wait 沒有遊戲側後果，等待時間到就重新觀察。
+        if (pending.Baseline is null)
+        {
+            if (now < pending.NotBefore) { LastStatus = $"等待中：{pending.Description}"; return; }
+            LastPlanningEvent = new("visual_wait_elapsed", $"重新觀察：{pending.Description}", now, PlanUpdateScope.Minor, nodeId);
+            LastStatus = $"等待完成，重新觀察：{pending.Description}";
+            _pending = null;
+            return;
+        }
+
+        var result = ActionOutcomeVerifier.Evaluate(pending.Baseline, update.State, history: null, now, out var status);
+        switch (result)
+        {
+            case PreviousActionResult.Confirmed:
+                _logger?.Write("automation.confirmed", new { planId = pending.PlanId, pending.Description, status });
+                LastPlanningEvent = new("visual_action_confirmed", status, now, PlanUpdateScope.Minor, nodeId,
+                    PreviousActionResult.Confirmed);
+                LastStatus = $"已確認：{pending.Description}（{status}）";
+                _pending = null;
+                _consecutiveFailures = 0;
+                return;
+
+            case PreviousActionResult.Failed:
+                FailOnce(pending.PlanId, $"{pending.Description}：{status}", now, nodeId);
+                _pending = null;
+                return;
+
+            default:
+                LastStatus = $"等待確認：{pending.Description}（{status}）";
+                return;
+        }
     }
 
     public PlanningEvent? ConsumePlanningEvent()
     { var result = LastPlanningEvent; LastPlanningEvent = null; return result; }
 
-    private void CompletePending(string result, DateTimeOffset now, GamePlan plan)
-    { LastPlanningEvent = new("visual_action_confirmed", result, now, PlanUpdateScope.Minor,
-        plan.MinorDecision?.NodeId, PreviousActionResult.Confirmed); LastStatus = result; _pending = null; _consecutiveFailures = 0; }
-
-    private void FailOnce(string planId, string reason, DateTimeOffset now, PlanUpdateScope scope, string? nodeId)
+    private void FailOnce(string planId, string reason, DateTimeOffset now, string? nodeId)
     {
         if (_lastFailedPlanId == planId) return;
         _lastFailedPlanId = planId; _consecutiveFailures++;
         LastStatus = $"已阻擋：{reason}（{_consecutiveFailures}/3）";
-        LastPlanningEvent = new("visual_action_blocked", reason, now, scope, nodeId, PreviousActionResult.Failed);
-        logger?.Write("automation.blocked", new { planId, reason, consecutiveFailures = _consecutiveFailures });
+        LastPlanningEvent = new("visual_action_blocked", reason, now, PlanUpdateScope.Minor, nodeId, PreviousActionResult.Failed);
+        _logger?.Write("automation.blocked", new { planId, reason, consecutiveFailures = _consecutiveFailures });
         if (_consecutiveFailures >= 3) Disable($"連續三次無法安全操作：{reason}");
     }
 
-    private static bool Safe(VisualToolAction action, out string reason)
+    public static string Describe(GameAction action) => action.Kind switch
     {
-        reason = "";
-        if (action.Tool is not (VisualToolKind.Observe or VisualToolKind.Wait) && string.IsNullOrWhiteSpace(action.Target))
-        { reason = "滑鼠動作缺少可稽核目標"; return false; }
-        if (action.Space == VisualCoordinateSpace.CommandGrid)
-        { if (action.Tool != VisualToolKind.LeftClick || action.Row <= 0 || action.Column <= 0) { reason = "命令格位動作無效"; return false; } return true; }
-        if (action.Space == VisualCoordinateSpace.Minimap && action.Tool == VisualToolKind.Drag)
-        { reason = "小地圖不允許拖曳"; return false; }
-        static bool Point(double x, double y) => x is >= 0.01 and <= 0.99 && y is >= 0.065 and <= 0.99;
-        if (action.Tool is VisualToolKind.LeftClick or VisualToolKind.RightClick && !Point(action.X, action.Y))
-        { reason = "點擊座標位於 HUD 或視窗邊界"; return false; }
-        if (action.Tool == VisualToolKind.Drag && (!Point(action.X, action.Y) || !Point(action.EndX, action.EndY) ||
-            Math.Sqrt(Math.Pow(action.EndX - action.X, 2) + Math.Pow(action.EndY - action.Y, 2)) > 0.6))
-        { reason = "拖曳座標或距離超出安全範圍"; return false; }
-        return true;
-    }
-
-    private static string Describe(VisualToolAction action) => action.Tool switch
-    {
-        VisualToolKind.LeftClick when action.Space == VisualCoordinateSpace.CommandGrid => $"左鍵命令格位 {action.Row},{action.Column}（{action.Target}）",
-        VisualToolKind.LeftClick => $"左鍵 {action.Space} {action.X:P0},{action.Y:P0}（{action.Target}）",
-        VisualToolKind.RightClick => $"右鍵 {action.X:P0},{action.Y:P0}", VisualToolKind.Drag => $"拖曳 {action.X:P0},{action.Y:P0} → {action.EndX:P0},{action.EndY:P0}",
-        _ => action.Tool.ToString(),
+        GameActionKind.Observe => "重新觀察畫面",
+        GameActionKind.Wait => "等待",
+        GameActionKind.QueueVillager => action.Quantity > 1 ? $"生產村民 ×{action.Quantity}" : "生產村民",
+        GameActionKind.AdvanceAge => "升時代",
+        GameActionKind.GatherFood => "指派村民採集食物",
+        GameActionKind.GatherWood => "指派村民採集木材",
+        GameActionKind.GatherGold => "指派村民採集黃金",
+        GameActionKind.BuildHouse => "建造房屋",
+        _ => action.Kind.ToString(),
     };
 
-    private sealed class PendingAction(string description, DateTimeOffset notBefore, DateTimeOffset deadline, bool requiresConfirmation = true)
-    {
-        public string Description { get; } = description;
-        public DateTimeOffset NotBefore { get; } = notBefore;
-        public DateTimeOffset Deadline { get; } = deadline;
-        public bool RequiresConfirmation { get; } = requiresConfirmation;
-        public bool RecheckRequested { get; set; }
-    }
+    private sealed record PendingAction(
+        string Description,
+        string PlanId,
+        ActionOutcomeBaseline? Baseline,
+        DateTimeOffset NotBefore,
+        DateTimeOffset Deadline);
 }

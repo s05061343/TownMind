@@ -17,6 +17,7 @@
     <Resource Include="..\..\assets\branding\agepilot-logo-512.png" Link="Assets\Branding\agepilot-logo.png" />
     <Resource Include="..\..\assets\branding\agepilot.ico" Link="Assets\Branding\agepilot.ico" />
     <None Include="..\..\config\hud\*.json" Link="config\hud\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\config\game-hotkeys\*.json" Link="config\game-hotkeys\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\doc\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />

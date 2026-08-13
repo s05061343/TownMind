@@ -66,6 +66,17 @@ var tests = new (string Name, Action Run)[]
     ("Visual prompt encoder creates panorama and UI crops", VisualPromptEncoderCreatesImages),
     ("Visual player decision rejects unsafe mouse targets", VisualDecisionRejectsUnsafeValues),
     ("Command grid maps to calibrated mouse coordinates", CommandGridMapsCoordinates),
+    ("Game action registry resolves town centre actions without coordinates", RegistryResolvesTownCentreActions),
+    ("Game action registry fails closed without key bindings", RegistryFailsClosedWithoutBindings),
+    ("Game action registry blocks unaffordable actions", RegistryBlocksUnaffordableActions),
+    ("Game action registry blocks phase 2 actions", RegistryBlocksPhaseTwoActions),
+    ("Outcome verifier confirms a resource spend", VerifierConfirmsResourceSpend),
+    ("Outcome verifier waits while OCR is unreliable", VerifierWaitsWhileOcrUnreliable),
+    ("Outcome verifier fails only after the deadline", VerifierFailsAfterDeadline),
+    ("Outcome verifier confirms an age advance", VerifierConfirmsAgeAdvance),
+    ("Response format exposes no coordinate fields", ResponseFormatOmitsCoordinates),
+    ("Game key sequences accept unmodified keys", GameKeySequencesAcceptUnmodifiedKeys),
+    ("Default game hotkey profile is present but unverified", DefaultGameHotKeyProfileIsUnverified),
 };
 
 var failures = 0;
@@ -751,19 +762,19 @@ static void VisualPromptEncoderCreatesImages()
 static void VisualDecisionRejectsUnsafeValues()
 {
     var now = DateTimeOffset.UtcNow;
-    var decision = new VisualPlayerDecision("已選村民", "建造兵營", "需要前置建築",
-        new VisualToolAction(VisualToolKind.LeftClick, VisualCoordinateSpace.Panorama, "畫面中的村民", 0.3, 0.4), "出現建築預覽", 1000, 0.9);
+    var decision = new VisualPlayerDecision("食物足夠且城鎮中心閒置", "維持村民生產", "人口尚未達上限",
+        new GameAction(GameActionKind.QueueVillager, "食物 350 足以負擔"), "食物減少 50", 1000, 0.9);
     var plan = new GamePlan("vlm", now, now.AddSeconds(30), "visual-player", decision.Goal, decision.Reason, decision.Confidence,
         MajorDecision: Node("major-1", DecisionLevel.Major), MediumDecision: Node("medium-1", DecisionLevel.Medium),
         MinorDecision: Node("minor-1", DecisionLevel.Minor), VisualDecision: decision);
     Equal(true, GamePlanValidator.Validate(plan, now).Success);
     Equal(false, GamePlanValidator.Validate(plan with { VisualDecision = decision with
     {
-        Action = decision.Action with { X = 1.2 },
+        Action = decision.Action with { Quantity = 99 },
     } }, now).Success);
     Equal(false, GamePlanValidator.Validate(plan with { VisualDecision = decision with
     {
-        Action = new VisualToolAction(VisualToolKind.RightClick, VisualCoordinateSpace.CommandGrid, "非法命令格位", Row: 1, Column: 1),
+        Action = decision.Action with { Reason = new string('x', 201) },
     } }, now).Success);
 }
 
@@ -777,6 +788,200 @@ static void CommandGridMapsCoordinates()
         out var x, out var y, out _));
     Equal(true, Math.Abs(x - 0.085) < 0.0001);
     Equal(true, Math.Abs(y - 0.91) < 0.0001);
+}
+
+static GameHotKeyBindings TestBindings() => new()
+{
+    Id = "test",
+    Verified = true,
+    Keys = new()
+    {
+        ["selectTownCenter"] = "H",
+        ["queueVillager"] = "Q",
+        ["advanceAge"] = "Z",
+        ["selectIdleVillager"] = ".",
+        ["selectAllIdleVillagers"] = "Shift+.",
+    },
+};
+
+static ObservedValue<int> Observed(int value) =>
+    new(value, 1, DateTimeOffset.UnixEpoch, ObservationStatus.Confirmed);
+
+static GameState StateWith(int food = 1000, int wood = 1000, int gold = 1000, GameAge age = GameAge.Feudal) =>
+    new()
+    {
+        Age = age,
+        Food = Observed(food),
+        Wood = Observed(wood),
+        Gold = Observed(gold),
+        Stone = Observed(500),
+        Population = Observed(40),
+        PopulationCap = Observed(70),
+    };
+
+static void RegistryResolvesTownCentreActions()
+{
+    var state = StateWith(food: 350);
+    Equal(true, GameActionRegistry.TryResolve(GameActionKind.QueueVillager, TestBindings(), state, state.Age,
+        out var villager, out _));
+    // H 選城鎮中心 → 等待面板重繪 → Q 生產村民。全程零滑鼠、零座標。
+    Equal(3, villager.Steps.Count);
+    Equal(ProcedureStepKind.GameKey, villager.Steps[0].Kind);
+    Equal("H", villager.Steps[0].Keys![0].Key);
+    Equal(ProcedureStepKind.Delay, villager.Steps[1].Kind);
+    Equal(ProcedureStepKind.GameKey, villager.Steps[2].Kind);
+    Equal("Q", villager.Steps[2].Keys![0].Key);
+    // 實際鍵位顯示這兩個動作都有快捷鍵，不該再走命令格位。
+    Equal(false, villager.Steps.Any(step => step.Kind == ProcedureStepKind.CommandGridClick));
+    Equal(PostconditionKind.ResourceSpent, villager.Post.Kind);
+    Equal(TrackedResource.Food, villager.Post.Resource);
+    Equal(50, villager.Post.Amount);
+
+    var castleReady = StateWith(food: 900, gold: 300, age: GameAge.Feudal);
+    Equal(true, GameActionRegistry.TryResolve(GameActionKind.AdvanceAge, TestBindings(), castleReady, castleReady.Age,
+        out var advance, out _));
+    Equal("Z", advance.Steps[2].Keys![0].Key);
+    Equal(false, advance.Steps.Any(step => step.Kind == ProcedureStepKind.CommandGridClick));
+    Equal(PostconditionKind.ResourceSpent, advance.Post.Kind);
+    Equal(800, advance.Post.Amount);
+}
+
+static void RegistryFailsClosedWithoutBindings()
+{
+    Equal(false, GameActionRegistry.TryResolve(GameActionKind.QueueVillager, GameHotKeyBindings.Empty(),
+        StateWith(), GameAge.Feudal, out _, out var reason));
+    Equal(true, reason.Contains("selectTownCenter", StringComparison.Ordinal));
+}
+
+static void RegistryBlocksUnaffordableActions()
+{
+    Equal(false, GameActionRegistry.TryResolve(GameActionKind.QueueVillager, TestBindings(),
+        StateWith(food: 10), GameAge.Feudal, out _, out var poor));
+    Equal(true, poor.Contains("食物", StringComparison.Ordinal));
+
+    // OCR 讀不到資源時一律不動作，而不是猜。
+    var blind = new GameState { Age = GameAge.Feudal, Food = ObservedValue<int>.Unavailable(DateTimeOffset.UnixEpoch) };
+    Equal(false, GameActionRegistry.TryResolve(GameActionKind.QueueVillager, TestBindings(), blind, GameAge.Feudal,
+        out _, out var unreadable));
+    Equal(true, unreadable.Contains("OCR", StringComparison.Ordinal));
+
+    // 帝王時代沒有下一個時代可升。
+    Equal(false, GameActionRegistry.TryResolve(GameActionKind.AdvanceAge, TestBindings(),
+        StateWith(age: GameAge.Imperial), GameAge.Imperial, out _, out _));
+}
+
+static void RegistryBlocksPhaseTwoActions()
+{
+    foreach (var kind in new[] { GameActionKind.GatherFood, GameActionKind.GatherWood, GameActionKind.GatherGold, GameActionKind.BuildHouse })
+    {
+        Equal(false, GameActionRegistry.TryResolve(kind, TestBindings(), StateWith(), GameAge.Feudal, out _, out var reason));
+        EqualContext(true, reason.Contains("Phase 2", StringComparison.Ordinal), kind.ToString());
+    }
+}
+
+static void VerifierConfirmsResourceSpend()
+{
+    var started = DateTimeOffset.UnixEpoch;
+    var baseline = new ActionOutcomeBaseline(GameActionKind.QueueVillager,
+        new Postcondition(PostconditionKind.ResourceSpent, TrackedResource.Food, 50),
+        StateWith(food: 300), started, started.AddSeconds(6));
+    Equal(PreviousActionResult.Confirmed,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(food: 250), null, started.AddSeconds(1), out _));
+    // 採集收入會抵銷一部分扣除，因此只要求跌幅達成本的一半。
+    Equal(PreviousActionResult.Confirmed,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(food: 272), null, started.AddSeconds(1), out _));
+    Equal(PreviousActionResult.Uncertain,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(food: 299), null, started.AddSeconds(1), out _));
+}
+
+static void VerifierWaitsWhileOcrUnreliable()
+{
+    var started = DateTimeOffset.UnixEpoch;
+    var baseline = new ActionOutcomeBaseline(GameActionKind.QueueVillager,
+        new Postcondition(PostconditionKind.ResourceSpent, TrackedResource.Food, 50),
+        StateWith(food: 300), started, started.AddSeconds(6));
+    var blind = new GameState { Age = GameAge.Feudal, Food = ObservedValue<int>.Unavailable(started) };
+    // 讀值不可靠不等於動作失敗——必須繼續等，否則會誤扣失敗次數並提早停用。
+    Equal(PreviousActionResult.Uncertain,
+        ActionOutcomeVerifier.Evaluate(baseline, blind, null, started.AddSeconds(1), out _));
+}
+
+static void VerifierFailsAfterDeadline()
+{
+    var started = DateTimeOffset.UnixEpoch;
+    var baseline = new ActionOutcomeBaseline(GameActionKind.QueueVillager,
+        new Postcondition(PostconditionKind.ResourceSpent, TrackedResource.Food, 50),
+        StateWith(food: 300), started, started.AddSeconds(6));
+    Equal(PreviousActionResult.Uncertain,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(food: 300), null, started.AddSeconds(5), out _));
+    Equal(PreviousActionResult.Failed,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(food: 300), null, started.AddSeconds(7), out _));
+}
+
+static void VerifierConfirmsAgeAdvance()
+{
+    var started = DateTimeOffset.UnixEpoch;
+    var baseline = new ActionOutcomeBaseline(GameActionKind.AdvanceAge,
+        new Postcondition(PostconditionKind.AgeAdvanced),
+        StateWith(age: GameAge.Feudal), started, started.AddSeconds(6));
+    Equal(PreviousActionResult.Confirmed,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(age: GameAge.Castle), null, started.AddSeconds(1), out _));
+    Equal(PreviousActionResult.Uncertain,
+        ActionOutcomeVerifier.Evaluate(baseline, StateWith(age: GameAge.Feudal), null, started.AddSeconds(1), out _));
+}
+
+static void ResponseFormatOmitsCoordinates()
+{
+    var json = JsonSerializer.Serialize(LlamaServerPlanner.BuildResponseFormat(PlanUpdateScope.Major));
+    foreach (var field in new[] { "\"x\"", "\"y\"", "\"endX\"", "\"endY\"", "\"row\"", "\"column\"", "\"space\"", "\"tool\"" })
+    {
+        EqualContext(false, json.Contains(field, StringComparison.Ordinal), field);
+    }
+    // 前一動作結果改由 ActionOutcomeVerifier 判定，不再詢問模型。
+    Equal(false, json.Contains("previousActionResult", StringComparison.Ordinal));
+    Equal(true, json.Contains("\"kind\"", StringComparison.Ordinal));
+    Equal(true, json.Contains(nameof(GameActionKind.QueueVillager), StringComparison.Ordinal));
+    // 自由文字欄位必須有長度上限，否則會撐爆 max_tokens 造成 JSON 截斷。
+    Equal(true, json.Contains("maxLength", StringComparison.Ordinal));
+}
+
+static void GameKeySequencesAcceptUnmodifiedKeys()
+{
+    Equal(1, GameKeySequenceParser.Parse("H").Count);
+    Equal(2, GameKeySequenceParser.Parse("H>Q").Count);
+    Equal("Q", GameKeySequenceParser.Parse("H>Q")[1].Key);
+    Equal(".", GameKeySequenceParser.Parse(".")[0].Key);
+
+    // 回歸測試：',' 本身是 AOE2 的按鍵（Go to Next Idle Military Unit）。
+    // 舊版用逗號當序列分隔符，會讓這個鍵永遠無法表達。
+    var comma = GameKeySequenceParser.Parse(",");
+    Equal(1, comma.Count);
+    Equal(",", comma[0].Key);
+
+    var shiftPeriod = GameKeySequenceParser.Parse("Shift+.");
+    Equal(1, shiftPeriod.Count);
+    Equal(".", shiftPeriod[0].Key);
+    Equal(1, shiftPeriod[0].Modifiers.Count);
+    Equal("Shift", shiftPeriod[0].Modifiers[0]);
+    Equal("Shift+.", shiftPeriod[0].ToString());
+
+    Throws<InvalidDataException>(() => GameKeySequenceParser.Parse(""));
+    // 修飾鍵不能單獨當主鍵。
+    Throws<InvalidDataException>(() => GameKeySequenceParser.Parse("Shift"));
+    Throws<InvalidDataException>(() => GameKeySequenceParser.Parse("Ctrl+Shift"));
+}
+
+static void DefaultGameHotKeyProfileIsUnverified()
+{
+    var bindings = GameHotKeyBindingsLoader.Load(FindRepositoryFile("config", "game-hotkeys", "aoe2de-tom.json"));
+    Equal("aoe2de-tom", bindings.Id);
+    foreach (var name in new[] { "selectTownCenter", "queueVillager", "advanceAge", "selectIdleVillager" })
+    {
+        EqualContext(true, bindings.TryGetKeys(name, out _, out _), name);
+    }
+    // ADR 0015：綁定在使用者於遊戲中實際按過確認前不得用於送出輸入。
+    // .hkp 解碼結果是佐證，不等於實機驗證。
+    Equal(false, bindings.Verified);
 }
 
 static void Equal<T>(T expected, T actual)

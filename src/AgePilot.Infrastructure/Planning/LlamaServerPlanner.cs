@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AgePilot.Core.Automation;
 using AgePilot.Core.Configuration;
 using AgePilot.Core.Planning;
 using AgePilot.Infrastructure.Diagnostics;
@@ -81,12 +82,11 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
                 ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
             var now = DateTimeOffset.UtcNow;
-            if (dto.Action is null) throw new InvalidDataException("模型未回傳滑鼠動作");
+            if (dto.Action is null) throw new InvalidDataException("模型未回傳動作");
             if (dto.MinorDecision is null) throw new InvalidDataException("模型未回傳 Minor 判斷");
-            var toolAction = new VisualToolAction(dto.Action.Tool, dto.Action.Space, dto.Action.Target ?? "", dto.Action.X, dto.Action.Y,
-                dto.Action.EndX, dto.Action.EndY, dto.Action.Row, dto.Action.Column);
-            var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, toolAction,
-                dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence, dto.PreviousActionResult);
+            var gameAction = new GameAction(dto.Action.Kind, dto.Action.Reason ?? "", Math.Max(1, dto.Action.Quantity));
+            var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, gameAction,
+                dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence);
             var (major, medium, minor) = AssembleDecisions(
                 dto.MajorDecision is { } majorDto ? ToDecision(majorDto, DecisionLevel.Major) : null,
                 dto.MediumDecision is { } mediumDto ? ToDecision(mediumDto, DecisionLevel.Medium) : null,
@@ -363,7 +363,20 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     private const string SystemPrompt = """
 /no_think
-你是謹慎的 AOE2 DE 經濟發展玩家。玩家的 directive 是不可改寫的長期策略與最終目標時代。你必須維護 Major、Medium、Minor 三層判斷：Major 是目前升時代階段，Medium 是達成它的方法（例如生產村民、避免卡人口、依可見證據選羊、果樹、野生動物或其他食物來源），Minor 是現在要完成的具體小目標。context.outputFields 列出這一輪你能輸出哪些層級（一定包含 minorDecision，可能包含 mediumDecision、majorDecision）；沒有列在 outputFields 裡的層級，系統會直接沿用 context.frozenDecisions 裡的內容，你的回覆裡不會有、也不能有那個欄位，不需要嘗試重寫它。若你認為 frozenDecisions 裡的層級已經不成立，把 requestedUpdateScope 設成需要的層級，下一輪系統才會把它加進 outputFields 讓你重建；這一輪仍然只能照 outputFields 輸出。正常情況 requestedUpdateScope 等於 allowedUpdateScope。nodeId 只能用英文字母、數字、-、_，長度 1-80，且不可以跟 frozenDecisions 裡任何 nodeId 相同。每個節點都要寫明畫面證據、完成條件與失敗條件。所有遊戲操作只能使用滑鼠，禁止快捷鍵與鍵盤輸入。panorama 是完整遊戲畫面；command_panel 是左下指令面板；minimap 是右下小地圖。每輪只輸出一個原子工具：Observe、Wait、LeftClick、RightClick 或 Drag。世界目標使用 Panorama normalized 座標；小地圖使用 Minimap 局部 normalized 座標；命令按鈕使用 CommandGrid 的 row 1..3、column 1..5，不得猜全畫面小圖示座標。每個輸入動作都必須用 target 簡述畫面上可見的目標證據。選取村民或建築後，下一輪必須從單位資訊與命令面板確認選取結果；未確認前只能 Observe 或 Wait。若 context 有 previousAction，先設定 previousActionResult；無法確認時必須 Uncertain 且不得提出新輸入。紅色建築預覽不可確認。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。不要輸出 Markdown，嚴格依 JSON schema 回覆。
+你是謹慎的 AOE2 DE 經濟發展玩家。玩家的 directive 是不可改寫的長期策略與最終目標時代。你必須維護 Major、Medium、Minor 三層判斷：Major 是目前升時代階段，Medium 是達成它的方法（例如生產村民、避免卡人口、依可見證據選擇食物來源），Minor 是現在要完成的具體小目標。context.outputFields 列出這一輪你能輸出哪些層級（一定包含 minorDecision，可能包含 mediumDecision、majorDecision）；沒有列在 outputFields 裡的層級，系統會直接沿用 context.frozenDecisions 裡的內容，你的回覆裡不會有、也不能有那個欄位，不需要嘗試重寫它。若你認為 frozenDecisions 裡的層級已經不成立，把 requestedUpdateScope 設成需要的層級，下一輪系統才會把它加進 outputFields 讓你重建；這一輪仍然只能照 outputFields 輸出。正常情況 requestedUpdateScope 等於 allowedUpdateScope。nodeId 只能用英文字母、數字、-、_，長度 1-80，且不可以跟 frozenDecisions 裡任何 nodeId 相同。每個節點都要寫明畫面證據、完成條件與失敗條件。
+
+你不操作滑鼠也不按鍵，不需要也不可以提供任何座標。你每輪只做一件事：從下列具名動作中選一個，系統會用寫死且測試過的程序去執行它。
+- Observe：畫面資訊不足，需要重新觀察。
+- Wait：情勢正確但還不到動作時機。
+- QueueVillager：在城鎮中心生產一名村民（需要 50 食物）。
+- AdvanceAge：升上下一個時代（黑暗→封建需 500 食物；封建→城堡需 800 食物與 200 黃金；城堡→帝王需 1000 食物與 800 黃金）。
+- GatherFood、GatherWood、GatherGold、BuildHouse：尚未開放，選了會被系統擋下，這一輪等於空轉。
+
+資源不足、OCR 讀值不可靠或動作尚未開放時，系統會擋下該動作，因此請依 context 提供的資源數值判斷是否負擔得起再選。
+
+expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值驗證的直接後果，例如「食物減少 50」「時代欄位改變」。不可以寫「升上城堡時代」「人口增加 10」這種需要數十秒到數分鐘、跨多個動作才會發生的策略結果——系統是用 HUD 數值變化來確認動作是否被遊戲接受的。
+
+前一動作的結果由系統依 OCR 自行判定，不會問你，你也不需要回報。panorama 是完整遊戲畫面，command_panel 是左下指令面板，minimap 是右下小地圖，用它們理解局勢即可。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。所有文字欄位都要精簡，assessment 不超過 300 字。不要輸出 Markdown，嚴格依 JSON schema 回覆。
 """;
 
     private static object DecisionNodeSchema() => new Dictionary<string, object>
@@ -383,44 +396,47 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         },
     };
 
+    /// <summary>
+    /// 依 ADR 0015，模型只選具名動作，不輸出任何座標。x/y/row/column/space 已全部移除——
+    /// 2026-08-13 的實機日誌顯示模型產出的座標是幻覺（0.05,0.1 連點 4 次且點在不可選取的樹上）。
+    /// 定位改由 GameActionRegistry 的程序負責。
+    /// </summary>
     private static object ActionSchema() => new Dictionary<string, object>
     {
         ["type"] = "object",
         ["additionalProperties"] = false,
-        ["required"] = new[] { "tool", "space", "target", "x", "y", "endX", "endY", "row", "column" },
+        ["required"] = new[] { "kind", "reason", "quantity" },
         ["properties"] = new Dictionary<string, object>
         {
-            ["tool"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<VisualToolKind>() },
-            ["space"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<VisualCoordinateSpace>() },
-            ["target"] = new { type = "string", maxLength = 80 },
-            ["x"] = new { type = "number", minimum = 0, maximum = 1 },
-            ["y"] = new { type = "number", minimum = 0, maximum = 1 },
-            ["endX"] = new { type = "number", minimum = 0, maximum = 1 },
-            ["endY"] = new { type = "number", minimum = 0, maximum = 1 },
-            ["row"] = new { type = "integer", minimum = 0, maximum = 3 },
-            ["column"] = new { type = "integer", minimum = 0, maximum = 5 },
+            ["kind"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<GameActionKind>() },
+            ["reason"] = new { type = "string", maxLength = 200 },
+            ["quantity"] = new { type = "integer", minimum = 1, maximum = 10 },
         },
     };
 
     public static object BuildResponseFormat(PlanUpdateScope scope)
     {
+        // action 排在最前面：strict json_schema 會依 properties 順序生成，先決定動作再寫論述，
+        // 避免舊版那種「寫完數百字才擠出決定」的行為。
+        // previousActionResult 已移除——改由 ActionOutcomeVerifier 依 OCR 判定，不再詢問模型。
+        // 所有自由文字欄位都有 maxLength：舊版無上限導致回覆撐爆 max_tokens=1024，
+        // 在 4735／5021 byte 處被截斷，2026-08-13 當天造成 4 次 planning.failure。
         var required = new List<string>
         {
-            "assessment", "goal", "reason", "confidence", "requestedUpdateScope",
-            "minorDecision", "action", "expectedResult", "recheckAfterMs", "previousActionResult",
+            "action", "expectedResult", "recheckAfterMs", "confidence",
+            "goal", "reason", "assessment", "requestedUpdateScope", "minorDecision",
         };
         var properties = new Dictionary<string, object>
         {
-            ["assessment"] = new { type = "string" },
-            ["goal"] = new { type = "string" },
-            ["reason"] = new { type = "string" },
-            ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
-            ["expectedResult"] = new { type = "string" },
+            ["action"] = ActionSchema(),
+            ["expectedResult"] = new { type = "string", maxLength = 150 },
             ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
-            ["previousActionResult"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PreviousActionResult>() },
+            ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["goal"] = new { type = "string", maxLength = 120 },
+            ["reason"] = new { type = "string", maxLength = 300 },
+            ["assessment"] = new { type = "string", maxLength = 300 },
             ["requestedUpdateScope"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PlanUpdateScope>() },
             ["minorDecision"] = DecisionNodeSchema(),
-            ["action"] = ActionSchema(),
         };
         if (scope >= PlanUpdateScope.Medium) { required.Add("mediumDecision"); properties["mediumDecision"] = DecisionNodeSchema(); }
         if (scope >= PlanUpdateScope.Major) { required.Add("majorDecision"); properties["majorDecision"] = DecisionNodeSchema(); }
@@ -448,9 +464,8 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private sealed record CompletionMessage(string Content);
     private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence, PlanUpdateScope RequestedUpdateScope,
         DecisionDto? MajorDecision, DecisionDto? MediumDecision, DecisionDto? MinorDecision,
-        VisualActionDto? Action, string ExpectedResult, int RecheckAfterMs, PreviousActionResult PreviousActionResult);
+        GameActionDto? Action, string ExpectedResult, int RecheckAfterMs);
     private sealed record DecisionDto(string NodeId, string Objective, string Reason, string Evidence,
         string CompletionCondition, string FailureCondition, DecisionStatus Status);
-    private sealed record VisualActionDto(VisualToolKind Tool, VisualCoordinateSpace Space, string? Target,
-        double X, double Y, double EndX, double EndY, int Row, int Column);
+    private sealed record GameActionDto(GameActionKind Kind, string? Reason, int Quantity);
 }

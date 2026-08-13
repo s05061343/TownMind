@@ -28,3 +28,5 @@ Accepted — 2026-08-13
 - `GamePlanValidator`、`GamePlanRecommendationAdapter`、`LlamaServerPlanner` 不再帶著只服務假占位動作的驗證與轉換邏輯。
 - `nodeId` 格式與跨層唯一性風險降低，但驗證器的 ASCII／唯一性檢查仍是最終防線，不因為 schema 端是否生效而改變行為。
 - 本決策取代 ADR 0008 中量化動作（`Actions`／`PlannedAction`）與其 UI 呈現規則的部分，以及 ADR 0011 中「凍結父層驗證由 merge 與逐欄位相等比對強制執行」的部分——現在改由 schema 結構本身保證模型無法輸出凍結層。
+
+2026-08-13：實機驗證發現送出滑鼠動作後，`AutomationController.Handle`（`src/AgePilot.App/AutomationController.cs`）在「重新觀察時間到、要求確認」的下一個 tick，會誤讀還沒更新的舊計畫 `PreviousActionResult`（描述的是更早之前的動作，不是剛送出的這個），導致動作在 VLM 真正重新看過畫面前就被誤判為 Uncertain/失敗。修正為 `PendingAction` 記住送出動作當下的 `PlanId`，只有偵測到 `plan.PlanId` 換成新值（代表 VLM 已重新規劃過一輪）才讀取 `PreviousActionResult`；同時「Uncertain」跟「Failed」一樣會清空 `_pending`，避免卡在同一個等待狀態直到連續失敗自動停止。

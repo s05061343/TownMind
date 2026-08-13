@@ -24,10 +24,9 @@ public static class GamePlanValidator
                 string.IsNullOrWhiteSpace(decision.Assessment) || string.IsNullOrWhiteSpace(decision.Goal) ||
                 string.IsNullOrWhiteSpace(decision.Reason) || string.IsNullOrWhiteSpace(decision.ExpectedResult))
                 return new(null, "視覺決策欄位無效");
-            if (!CoordinatesAreSafe(decision.Action)) return new(null, "滑鼠座標或座標空間無效");
-            if (decision.Action.Target.Length > 80) return new(null, "滑鼠目標描述過長");
-            if (decision.Action.Tool is not (VisualToolKind.Observe or VisualToolKind.Wait) &&
-                string.IsNullOrWhiteSpace(decision.Action.Target)) return new(null, "滑鼠動作缺少目標證據");
+            if (!Enum.IsDefined(decision.Action.Kind)) return new(null, "動作名稱無效");
+            if (decision.Action.Quantity is < 1 or > 10) return new(null, "動作數量超出範圍");
+            if (decision.Action.Reason.Length > 200) return new(null, "動作理由過長");
         }
         return new(plan);
     }
@@ -38,18 +37,4 @@ public static class GamePlanValidator
         !string.IsNullOrWhiteSpace(node.Objective) && !string.IsNullOrWhiteSpace(node.Reason) &&
         !string.IsNullOrWhiteSpace(node.Evidence) && !string.IsNullOrWhiteSpace(node.CompletionCondition) &&
         !string.IsNullOrWhiteSpace(node.FailureCondition);
-
-    private static bool CoordinatesAreSafe(VisualToolAction action)
-    {
-        static bool Unit(double value) => value is >= 0 and <= 1;
-        if (action.Space == VisualCoordinateSpace.CommandGrid)
-            return action.Tool == VisualToolKind.LeftClick && action.Row is >= 1 and <= 3 && action.Column is >= 1 and <= 5;
-        if (action.Space == VisualCoordinateSpace.Minimap && action.Tool == VisualToolKind.Drag) return false;
-        return action.Tool switch
-        {
-            VisualToolKind.LeftClick or VisualToolKind.RightClick => Unit(action.X) && Unit(action.Y),
-            VisualToolKind.Drag => action.Space == VisualCoordinateSpace.Panorama && Unit(action.X) && Unit(action.Y) && Unit(action.EndX) && Unit(action.EndY),
-            _ => true,
-        };
-    }
 }

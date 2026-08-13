@@ -6,6 +6,8 @@ namespace AgePilot.Vision.Images;
 
 public static class VisualPromptImageEncoder
 {
+    // ADR 0014 曾在此疊加座標網格，用於輔助模型估算 normalized 座標。
+    // ADR 0015 之後模型不再輸出任何座標，該輔助失去用途，已移除。
     public static IReadOnlyList<VisualImage> Encode(
         ReadOnlySpan<byte> bgra, int width, int height,
         NormalizedRect commandPanel, NormalizedRect minimap)

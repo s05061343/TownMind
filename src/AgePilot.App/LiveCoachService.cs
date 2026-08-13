@@ -226,9 +226,14 @@ public sealed class LiveCoachService(
             _previousVisualAction = executionEvent.Detail;
             _previousVisualResult = null;
         }
-        else if (executionEvent.Kind is not ("visual_action_recheck_due" or "visual_wait_elapsed"))
+        else if (executionEvent.Kind is "visual_action_confirmed" or "visual_action_blocked")
         {
-            _previousVisualResult = executionEvent.Kind;
+            // 動作已由 ActionOutcomeVerifier 結案。必須清除：不清除的話之後每一輪 prompt 都會夾帶
+            // 同一個 previousAction，讓模型對早已結束的動作反覆表態。
+            _previousVisualAction = null;
+            _previousVisualResult = executionEvent.Kind == "visual_action_confirmed"
+                ? $"已確認：{executionEvent.Detail}"
+                : $"已阻擋：{executionEvent.Detail}";
         }
         _strategy.ReportExecutionEvent(executionEvent);
     }
