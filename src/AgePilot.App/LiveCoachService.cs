@@ -200,6 +200,7 @@ public sealed class LiveCoachService(
     private void LogPopulationOcr(HudOcrResult raw, GameState state)
     {
         var observation = raw.Fields[HudField.Population];
+        var parse = PopulationTextParser.ParseDetailed(observation.RawText);
         var outcome = _adaptiveOcr?.LastCacheOutcomes.FirstOrDefault(item => item.Key == HudField.Population.ToString());
         var usable = state.Population?.IsUsable == true && state.PopulationCap?.IsUsable == true;
         var signature = $"{observation.RawText}|{observation.Confidence:F3}|{raw.Population}|{usable}|{outcome?.Reason}";
@@ -211,6 +212,7 @@ public sealed class LiveCoachService(
             observation.Confidence,
             parsedCurrent = raw.Population?.Current,
             parsedCap = raw.Population?.Cap,
+            parseKind = parse?.Kind.ToString(),
             cacheReason = outcome?.Reason ?? "cached-observation",
             consistentCount = outcome?.ConsistentCount ?? 0,
         });

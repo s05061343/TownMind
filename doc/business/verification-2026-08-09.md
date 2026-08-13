@@ -11,7 +11,7 @@ dotnet build AgePilot.sln --no-restore
 
 `AgePilot.Tests` 用於確定性 OCR、快取、Gate 與規劃回歸；它不能證明 App 已在遊戲端實際完成操作。實機行為仍須由使用者操作對局驗收。
 
-2026-08-13 回歸結果為 10/10：包含 OCR 失敗下一幀重試、67.2% 人口成對確認、矛盾候選維持 unavailable、人口 Gate、房屋壓力重規劃、LLM 動作白名單、Live Trace 移除、舊設定清理及四張 Screenshot manifest OCR ground truth。
+2026-08-14 回歸結果為 14/14：包含人口 `/` 誤判與遺失修復、歧義拆分 fail-closed、人口專用 OCR 前處理路徑、修復值需兩次獨立掃描、OCR 失敗下一幀重試、67.2% 人口成對確認、矛盾候選維持 unavailable、人口 Gate、房屋壓力重規劃、LLM 動作白名單、Live Trace 移除、舊設定清理及四張 Screenshot manifest OCR ground truth。
 
 ## Vision Benchmark
 

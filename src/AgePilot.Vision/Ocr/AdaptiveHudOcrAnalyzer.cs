@@ -33,6 +33,18 @@ public sealed class AdaptiveHudOcrAnalyzer(IFrameOcrEngine engine, HudProfile pr
             {
                 var request = requests[index];
                 var observation = observations[index];
+                if (request.Key == HudField.Population.ToString() &&
+                    engine is IPopulationOcrEngine populationEngine &&
+                    PopulationTextParser.ParseDetailed(observation.RawText)?.Kind is not PopulationParseKind.LiteralSeparator)
+                {
+                    observation = populationEngine.RefinePopulation(
+                        bgraPixels, width, height, request.Region, observation);
+                }
+                if (request.Key == HudField.Population.ToString() &&
+                    PopulationTextParser.ParseDetailed(observation.RawText)?.Kind is not PopulationParseKind.LiteralSeparator)
+                {
+                    observation = observation with { Confidence = Math.Min(observation.Confidence, ImmediateCacheConfidence - 0.01) };
+                }
                 current[request.Key] = observation;
                 var identity = CandidateIdentity(request.Key, observation);
 
@@ -60,11 +72,10 @@ public sealed class AdaptiveHudOcrAnalyzer(IFrameOcrEngine engine, HudProfile pr
                     continue;
                 }
 
-                var count = _candidates.TryGetValue(request.Key, out var candidate) &&
-                            candidate.Fingerprint == request.Fingerprint && candidate.Identity == identity
+                var count = _candidates.TryGetValue(request.Key, out var candidate) && candidate.Identity == identity
                     ? candidate.Count + 1
                     : 1;
-                _candidates[request.Key] = new CandidateEntry(request.Fingerprint, identity, count);
+                _candidates[request.Key] = new CandidateEntry(identity, count);
                 if (count >= 2)
                 {
                     _cache[request.Key] = new CacheEntry(request.Fingerprint, observation, capturedAt);
@@ -135,7 +146,7 @@ public sealed class AdaptiveHudOcrAnalyzer(IFrameOcrEngine engine, HudProfile pr
     }
 
     private sealed record CacheEntry(ulong Fingerprint, OcrResult Observation, DateTimeOffset RecognizedAt);
-    private sealed record CandidateEntry(ulong Fingerprint, string Identity, int Count);
+    private sealed record CandidateEntry(string Identity, int Count);
     private sealed record RegionRequest(string Key, PixelRect Region, ulong Fingerprint);
 }
 

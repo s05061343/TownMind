@@ -21,4 +21,14 @@ public interface IFrameOcrEngine
         IReadOnlyList<PixelRect> regions);
 }
 
+public interface IPopulationOcrEngine
+{
+    OcrResult RefinePopulation(
+        ReadOnlyMemory<byte> bgraPixels,
+        int frameWidth,
+        int frameHeight,
+        PixelRect region,
+        OcrResult baseline);
+}
+
 public sealed record OcrResult(string RawText, int? Value, double Confidence);

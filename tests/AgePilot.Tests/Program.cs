@@ -13,6 +13,10 @@ using AgePilot.Vision.Profiles;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Population parser repairs OCR separators safely", PopulationParserRepairsSeparatorsSafely),
+    ("Ambiguous compact population fails closed", AmbiguousCompactPopulationFailsClosed),
+    ("Population OCR uses field-specific refinement", PopulationOcrUsesFieldSpecificRefinement),
+    ("Repaired population requires two independent scans", RepairedPopulationRequiresTwoScans),
     ("Failed OCR is retried on the next frame", FailedOcrIsRetried),
     ("Medium confidence population is confirmed as a pair", MediumConfidencePopulationIsConfirmedAsPair),
     ("Conflicting population candidates remain unavailable", ConflictingPopulationRemainsUnavailable),
@@ -33,6 +37,56 @@ foreach (var test in tests)
 }
 Console.WriteLine($"{tests.Length - failures}/{tests.Length} tests passed.");
 return failures == 0 ? 0 : 1;
+
+static void PopulationParserRepairsSeparatorsSafely()
+{
+    Equal(new PopulationValue(5, 5), PopulationTextParser.Parse("5/5"));
+    Equal(new PopulationValue(5, 75), PopulationTextParser.Parse("5I75"));
+    Equal(new PopulationValue(5, 100), PopulationTextParser.Parse("5|100"));
+    Equal(new PopulationValue(5, 5), PopulationTextParser.Parse("515"));
+    Equal(new PopulationValue(5, 15), PopulationTextParser.Parse("5115"));
+    Equal(new PopulationValue(75, 100), PopulationTextParser.Parse("751100"));
+    Equal(new PopulationValue(100, 200), PopulationTextParser.Parse("1001200"));
+    Equal(new PopulationValue(5, 100), PopulationTextParser.Parse("5100"));
+}
+
+static void AmbiguousCompactPopulationFailsClosed()
+{
+    Equal<PopulationValue?>(null, PopulationTextParser.Parse("2234"));
+    Equal<PopulationValue?>(null, PopulationTextParser.Parse("5/5/5"));
+    Equal<PopulationValue?>(null, PopulationTextParser.Parse("5/501"));
+    Equal<PopulationValue?>(null, PopulationTextParser.Parse("200/100"));
+}
+
+static void PopulationOcrUsesFieldSpecificRefinement()
+{
+    var engine = new RefiningFrameEngine();
+    var result = Analyzer(engine).AnalyzeFrame(BlankFrame(), 2560, 1440, DateTimeOffset.UnixEpoch);
+    Equal(new PopulationValue(5, 5), result.Population);
+    Equal(1, engine.RefinementCount);
+    Equal("5/5", result.Fields[HudField.Population].RawText);
+}
+
+static void RepairedPopulationRequiresTwoScans()
+{
+    var analyzer = Analyzer(new FrameSequenceEngine([
+        FullFramePopulation(new("515", null, 0.97)),
+        [new("515", null, 0.96)],
+    ]));
+    var estimator = new TemporalGameStateEstimator();
+    var pixels = BlankFrame();
+    var now = DateTimeOffset.UnixEpoch;
+    var first = estimator.Update(analyzer.AnalyzeFrame(pixels, 2560, 1440, now), now);
+    Equal(false, first.Population?.IsUsable == true);
+
+    var populationRegion = new PixelRect(608, 15, 70, 36);
+    pixels[(populationRegion.Y * 2560 + populationRegion.X) * 4] = 1;
+    var secondAt = now.AddMilliseconds(500);
+    var second = estimator.Update(analyzer.AnalyzeFrame(pixels, 2560, 1440, secondAt), secondAt);
+    Equal(5, second.Population?.Value);
+    Equal(5, second.PopulationCap?.Value);
+    Equal(true, second.Population?.IsUsable == true && second.PopulationCap?.IsUsable == true);
+}
 
 static void FailedOcrIsRetried()
 {
@@ -244,6 +298,27 @@ sealed class FrameSequenceEngine(IEnumerable<IReadOnlyList<OcrResult>> frames) :
         if (result.Count != regions.Count) throw new InvalidOperationException($"Fake OCR expected {result.Count} regions, got {regions.Count}.");
         return result;
     }
+}
+
+sealed class RefiningFrameEngine : IFrameOcrEngine, IPopulationOcrEngine
+{
+    public int RefinementCount { get; private set; }
+
+    public IReadOnlyList<OcrResult> RecognizeFrame(ReadOnlyMemory<byte> bgraPixels, int frameWidth, int frameHeight,
+        IReadOnlyList<PixelRect> regions) => FullFramePopulation(new("515", null, 0.97));
+
+    public OcrResult RefinePopulation(ReadOnlyMemory<byte> bgraPixels, int frameWidth, int frameHeight,
+        PixelRect region, OcrResult baseline)
+    {
+        RefinementCount++;
+        return new("5/5", null, 0.8);
+    }
+
+    private static OcrResult[] FullFramePopulation(OcrResult population) =>
+    [
+        new("200", 200, 0.99), new("200", 200, 0.99), new("100", 100, 0.99), new("200", 200, 0.99),
+        population, new("Dark Age", null, 0.99), new("", null, 0),
+    ];
 }
 
 sealed class RecordingPlanner(Func<DateTimeOffset, GamePlan> planFactory) : IStrategicPlanner
