@@ -104,6 +104,7 @@ public sealed class StrategyEngine : IDisposable
 
     private void Request(PlanUpdateScope scope)
     {
+        if (_current is null) scope = PlanUpdateScope.Major;
         if (_requestedScope is null || (int)scope > (int)_requestedScope.Value) _requestedScope = scope;
     }
 

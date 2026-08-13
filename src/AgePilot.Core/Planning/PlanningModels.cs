@@ -107,32 +107,6 @@ public sealed record VisualPlayerDecision(
     double Confidence,
     PreviousActionResult PreviousActionResult = PreviousActionResult.NotApplicable);
 
-public enum PlannedActionKind
-{
-    QueueVillager, BuildHouse, GatherFood, GatherWood, GatherGold,
-    AdvanceFeudal, AdvanceCastle, DevelopWaterEconomy, Scout, Wait, Reobserve,
-    QueueUnit, AssignWorkers, BuildBuilding, ResearchTechnology, AdvanceAge,
-}
-
-public sealed record PlanCondition(string Field, string Operator, string Value);
-
-public sealed record PlannedAction(
-    PlannedActionKind Intent,
-    int Priority,
-    string Reason,
-    int Quantity = 0,
-    int TargetPopulationCap = 0,
-    int TargetFoodWorkers = 0,
-    int TargetWoodWorkers = 0,
-    int TargetGoldWorkers = 0,
-    int TargetStoneWorkers = 0,
-    int TargetResourceAmount = 0,
-    int RecheckSeconds = 20,
-    string SuccessCondition = "",
-    IReadOnlyList<PlanCondition>? Preconditions = null,
-    IReadOnlyList<PlanCondition>? CompletionConditions = null,
-    string TargetId = "");
-
 public sealed record GamePlan(
     string PlanId,
     DateTimeOffset CreatedAt,
@@ -141,9 +115,6 @@ public sealed record GamePlan(
     string CurrentGoal,
     string Reason,
     double Confidence,
-    IReadOnlyList<string> Assumptions,
-    IReadOnlyList<string> MissingInformation,
-    IReadOnlyList<PlannedAction> Actions,
     bool ReusedAfterPlanningFailure = false,
     VisualPlayerDecision? VisualDecision = null,
     int Revision = 1,

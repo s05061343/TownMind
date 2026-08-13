@@ -53,14 +53,16 @@ var tests = new (string Name, Action Run)[]
     ("Brand assets include Windows icon sizes", BrandAssetsIncludeWindowsIconSizes),
     ("Application hotkeys are parsed", AutomationInputsAreParsed),
     ("Automation settings reject conflicting hotkeys", AutomationSettingsRejectConflictingHotkeys),
-    ("Game plan validator rejects unsafe conditions", GamePlanValidatorRejectsUnsafeConditions),
+    ("Game plan validator rejects duplicate or missing decisions", GamePlanValidatorRejectsDuplicateOrMissingDecisions),
     ("Strategy engine replans only the affected hierarchy", StrategyEngineReplansAffectedHierarchy),
+    ("Strategy engine keeps requesting Major until the first plan succeeds", StrategyEngineKeepsRequestingMajorUntilFirstPlanSucceeds),
     ("Mouse probe verifies movement and restores cursor", MouseProbeVerifiesAndRestores),
     ("Mouse probe fails when cursor does not move", MouseProbeRejectsMissingMovement),
     ("Minimap requires temporal confirmation", MinimapRequiresTemporalConfirmation),
     ("GPU device parser rejects CPU fallback", GpuDeviceParserRejectsCpuFallback),
     ("Quantified plan becomes concrete recommendation", QuantifiedPlanBecomesConcreteRecommendation),
-    ("LLM quantities are corrected by observed game state", LlmQuantitiesAreCorrectedByGameState),
+    ("Response format includes fields matching the requested scope", ResponseFormatIncludesFieldsPerScope),
+    ("AssembleDecisions carries frozen levels forward by scope", AssembleDecisionsRespectsScope),
     ("Visual prompt encoder creates panorama and UI crops", VisualPromptEncoderCreatesImages),
     ("Visual player decision rejects unsafe mouse targets", VisualDecisionRejectsUnsafeValues),
     ("Command grid maps to calibrated mouse coordinates", CommandGridMapsCoordinates),
@@ -557,17 +559,21 @@ static void AutomationSettingsRejectConflictingHotkeys()
     Throws<InvalidDataException>(settings.Validate);
 }
 
-static void GamePlanValidatorRejectsUnsafeConditions()
+static void GamePlanValidatorRejectsDuplicateOrMissingDecisions()
 {
     var now = DateTimeOffset.UtcNow;
-    var valid = new GamePlan("p1", now, now.AddSeconds(60), "economy", "補人口", "人口仍有空間", 0.8,
-        [], [], [new PlannedAction(PlannedActionKind.QueueVillager, 80, "維持生產")]);
+    var allNull = new GamePlan("p1", now, now.AddSeconds(60), "economy", "補人口", "人口仍有空間", 0.8);
+    Equal(false, GamePlanValidator.Validate(allNull, now).Success);
+
+    var duplicateNodeId = new GamePlan("p2", now, now.AddSeconds(60), "economy", "補人口", "人口仍有空間", 0.8,
+        MajorDecision: Node("shared-id", DecisionLevel.Major), MediumDecision: Node("medium-1", DecisionLevel.Medium),
+        MinorDecision: Node("shared-id", DecisionLevel.Minor));
+    Equal(false, GamePlanValidator.Validate(duplicateNodeId, now).Success);
+
+    var valid = new GamePlan("p3", now, now.AddSeconds(60), "economy", "補人口", "人口仍有空間", 0.8,
+        MajorDecision: Node("major-1", DecisionLevel.Major), MediumDecision: Node("medium-1", DecisionLevel.Medium),
+        MinorDecision: Node("minor-1", DecisionLevel.Minor));
     Equal(true, GamePlanValidator.Validate(valid, now).Success);
-    var unsafePlan = valid with
-    {
-        Actions = [new PlannedAction(PlannedActionKind.QueueVillager, 80, "test", Preconditions: [new PlanCondition("mouseX", "eq", "42")])],
-    };
-    Equal(false, GamePlanValidator.Validate(unsafePlan, now).Success);
 }
 
 static void StrategyEngineReplansAffectedHierarchy()
@@ -602,9 +608,27 @@ static void StrategyEngineReplansAffectedHierarchy()
     Equal(PlanUpdateScope.Medium, planner.Contexts[2].AllowedUpdateScope);
 }
 
+static void StrategyEngineKeepsRequestingMajorUntilFirstPlanSucceeds()
+{
+    var now = DateTimeOffset.UtcNow;
+    var success = HierarchyPlan("p1", now, "major-1", "medium-1", "minor-1");
+    var planner = new SequencePlanner([new(null, "boom"), new(success)]);
+    using var engine = new StrategyEngine(planner);
+    var state = new GameState { Food = Confirmed(100, now), Population = Confirmed(4, now), PopulationCap = Confirmed(5, now) };
+    var history = new GameHistory(); history.Add(state, now);
+
+    _ = engine.UpdateAsync(state, history, null, now, CancellationToken.None).GetAwaiter().GetResult();
+    _ = engine.UpdateAsync(state, history, null, now, CancellationToken.None).GetAwaiter().GetResult();
+
+    engine.ReportExecutionEvent(new PlanningEvent("visual_action_blocked", "假裝有一個 Minor 範圍的事件", now, PlanUpdateScope.Minor));
+    _ = engine.UpdateAsync(state, history, null, now.AddSeconds(1), CancellationToken.None).GetAwaiter().GetResult();
+
+    Equal(2, planner.Contexts.Count);
+    Equal(PlanUpdateScope.Major, planner.Contexts[1].AllowedUpdateScope);
+}
+
 static GamePlan HierarchyPlan(string id, DateTimeOffset now, string majorId, string mediumId, string minorId) =>
-    new(id, now, now.AddSeconds(60), "穩定發展經濟並升時代", "執行小判斷", "測試", 0.9, [], [],
-        [new PlannedAction(PlannedActionKind.Reobserve, 80, "測試")],
+    new(id, now, now.AddSeconds(60), "穩定發展經濟並升時代", "執行小判斷", "測試", 0.9,
         MajorDecision: Node(majorId, DecisionLevel.Major), MediumDecision: Node(mediumId, DecisionLevel.Medium),
         MinorDecision: Node(minorId, DecisionLevel.Minor));
 
@@ -654,43 +678,73 @@ static void GpuDeviceParserRejectsCpuFallback()
 static void QuantifiedPlanBecomesConcreteRecommendation()
 {
     var now = DateTimeOffset.UtcNow;
-    var plan = new GamePlan("p", now, now.AddSeconds(60), "經濟", "避免卡人口", "人口空間不足", 0.9, [], [],
-        [new PlannedAction(PlannedActionKind.BuildHouse, 90, "先補住房", Quantity: 2, TargetPopulationCap: 30,
-            TargetFoodWorkers: 12, TargetWoodWorkers: 8, TargetGoldWorkers: 3, TargetStoneWorkers: 0,
-            RecheckSeconds: 20, SuccessCondition: "人口上限達到 30")]);
+    var minor = new DecisionNode("build-houses", DecisionLevel.Minor, "建造 2 間房屋", "人口空間不足",
+        "命令面板顯示可建造房屋", "人口上限達到 30", "資源不足以建造");
+    var plan = new GamePlan("p", now, now.AddSeconds(60), "經濟", "避免卡人口", "人口空間不足", 0.9,
+        MajorDecision: Node("major-1", DecisionLevel.Major), MediumDecision: Node("medium-1", DecisionLevel.Medium),
+        MinorDecision: minor);
     var recommendation = GamePlanRecommendationAdapter.Convert(plan).Single();
+    Equal("plan:build-houses", recommendation.Id);
     Equal("建造 2 間房屋", recommendation.Title);
-    Equal(true, recommendation.Description.Contains("木材 8 人", StringComparison.Ordinal));
-    Equal(true, recommendation.Description.Contains("目標配置（非目前實測）", StringComparison.Ordinal));
     Equal(true, recommendation.Description.Contains("人口上限達到 30", StringComparison.Ordinal));
+    Equal(CoachSeverity.Suggestion, recommendation.Severity);
+
+    var blocked = GamePlanRecommendationAdapter.Convert(plan with { MinorDecision = minor with { Status = DecisionStatus.Blocked } }).Single();
+    Equal(CoachSeverity.Warning, blocked.Severity);
 }
 
-static void LlmQuantitiesAreCorrectedByGameState()
+static void ResponseFormatIncludesFieldsPerScope()
+{
+    var minorJson = JsonSerializer.Serialize(LlamaServerPlanner.BuildResponseFormat(PlanUpdateScope.Minor));
+    Equal(true, minorJson.Contains("\"minorDecision\"", StringComparison.Ordinal));
+    Equal(false, minorJson.Contains("\"majorDecision\"", StringComparison.Ordinal));
+    Equal(false, minorJson.Contains("\"mediumDecision\"", StringComparison.Ordinal));
+
+    var mediumJson = JsonSerializer.Serialize(LlamaServerPlanner.BuildResponseFormat(PlanUpdateScope.Medium));
+    Equal(true, mediumJson.Contains("\"mediumDecision\"", StringComparison.Ordinal));
+    Equal(false, mediumJson.Contains("\"majorDecision\"", StringComparison.Ordinal));
+
+    var majorJson = JsonSerializer.Serialize(LlamaServerPlanner.BuildResponseFormat(PlanUpdateScope.Major));
+    Equal(true, majorJson.Contains("\"majorDecision\"", StringComparison.Ordinal));
+    Equal(true, majorJson.Contains("\"mediumDecision\"", StringComparison.Ordinal));
+    Equal(true, majorJson.Contains("\"pattern\":\"^[A-Za-z0-9_-]{1,80}$\"", StringComparison.Ordinal));
+}
+
+static void AssembleDecisionsRespectsScope()
 {
     var now = DateTimeOffset.UtcNow;
-    var state = new GameState { Population = Confirmed(18, now), PopulationCap = Confirmed(20, now) };
-    var raw = new PlannedAction(PlannedActionKind.BuildHouse, 1, "住房", Quantity: 1, TargetPopulationCap: 20,
-        TargetFoodWorkers: 5, TargetWoodWorkers: 5, RecheckSeconds: 30);
-    var corrected = LlamaServerPlanner.NormalizeQuantities(raw, state);
-    Equal(25, corrected.TargetPopulationCap);
-    Equal(17, corrected.TargetFoodWorkers + corrected.TargetWoodWorkers + corrected.TargetGoldWorkers + corrected.TargetStoneWorkers);
-    Equal(true, corrected.SuccessCondition.Contains("25", StringComparison.Ordinal));
+    var previous = new GamePlan("prev", now, now.AddSeconds(60), "s", "g", "r", 0.9,
+        MajorDecision: Node("major-1", DecisionLevel.Major), MediumDecision: Node("medium-1", DecisionLevel.Medium),
+        MinorDecision: Node("minor-1", DecisionLevel.Minor));
+    var freshMinor = Node("minor-2", DecisionLevel.Minor);
+    var freshMedium = Node("medium-2", DecisionLevel.Medium);
+    var freshMajor = Node("major-2", DecisionLevel.Major);
 
-    var withoutAllocation = raw with { TargetFoodWorkers = 0, TargetWoodWorkers = 0 };
-    var allocated = LlamaServerPlanner.NormalizeQuantities(withoutAllocation, state,
-        new MapContext(MapArchetype.Island, 0.6, 0.1, 0.2, 0.5, 2, 0.3, 0.9, ObservationStatus.Confirmed, now, 3));
-    Equal(17, allocated.TargetFoodWorkers + allocated.TargetWoodWorkers + allocated.TargetGoldWorkers + allocated.TargetStoneWorkers);
-    Equal(true, allocated.TargetWoodWorkers > allocated.TargetGoldWorkers);
+    var minorScope = LlamaServerPlanner.AssembleDecisions(null, null, freshMinor, previous, PlanUpdateScope.Minor);
+    Equal("major-1", minorScope.Major.NodeId);
+    Equal("medium-1", minorScope.Medium.NodeId);
+    Equal("minor-2", minorScope.Minor.NodeId);
+
+    var mediumScope = LlamaServerPlanner.AssembleDecisions(null, freshMedium, freshMinor, previous, PlanUpdateScope.Medium);
+    Equal("major-1", mediumScope.Major.NodeId);
+    Equal("medium-2", mediumScope.Medium.NodeId);
+
+    var majorScope = LlamaServerPlanner.AssembleDecisions(freshMajor, freshMedium, freshMinor, previous, PlanUpdateScope.Major);
+    Equal("major-2", majorScope.Major.NodeId);
+    Equal("medium-2", majorScope.Medium.NodeId);
+
+    Throws<InvalidOperationException>(() => LlamaServerPlanner.AssembleDecisions(null, null, freshMinor, null, PlanUpdateScope.Minor));
 }
 
 static void VisualPromptEncoderCreatesImages()
 {
     var image = BgraImageLoader.Load(FindRepositoryFile("img", "Snipaste_2026-08-12_20-38-47.jpg"));
     var encoded = VisualPromptImageEncoder.Encode(image.Pixels, image.Width, image.Height,
-        new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33),
-        new NormalizedRect(0, 0, 0.45, 0.06));
-    Equal(4, encoded.Count);
+        new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33));
+    Equal(3, encoded.Count);
     Equal("panorama", encoded[0].Name);
+    Equal("command_panel", encoded[1].Name);
+    Equal("minimap", encoded[2].Name);
     Equal(true, encoded.All(item => item.MimeType == "image/jpeg" && item.Data.Length > 1000));
 }
 
@@ -699,9 +753,9 @@ static void VisualDecisionRejectsUnsafeValues()
     var now = DateTimeOffset.UtcNow;
     var decision = new VisualPlayerDecision("已選村民", "建造兵營", "需要前置建築",
         new VisualToolAction(VisualToolKind.LeftClick, VisualCoordinateSpace.Panorama, "畫面中的村民", 0.3, 0.4), "出現建築預覽", 1000, 0.9);
-    var plan = new GamePlan("vlm", now, now.AddSeconds(30), "visual-player", decision.Goal, decision.Reason,
-        decision.Confidence, [], [], [new PlannedAction(PlannedActionKind.Reobserve, 80, decision.Reason)],
-        VisualDecision: decision);
+    var plan = new GamePlan("vlm", now, now.AddSeconds(30), "visual-player", decision.Goal, decision.Reason, decision.Confidence,
+        MajorDecision: Node("major-1", DecisionLevel.Major), MediumDecision: Node("medium-1", DecisionLevel.Medium),
+        MinorDecision: Node("minor-1", DecisionLevel.Minor), VisualDecision: decision);
     Equal(true, GamePlanValidator.Validate(plan, now).Success);
     Equal(false, GamePlanValidator.Validate(plan with { VisualDecision = decision with
     {

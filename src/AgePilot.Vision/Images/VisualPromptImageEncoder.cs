@@ -8,7 +8,7 @@ public static class VisualPromptImageEncoder
 {
     public static IReadOnlyList<VisualImage> Encode(
         ReadOnlySpan<byte> bgra, int width, int height,
-        NormalizedRect commandPanel, NormalizedRect minimap, NormalizedRect topHud)
+        NormalizedRect commandPanel, NormalizedRect minimap)
     {
         using var source = Mat.FromPixelData(height, width, MatType.CV_8UC4, bgra.ToArray());
         using var panorama = new Mat();
@@ -16,7 +16,6 @@ public static class VisualPromptImageEncoder
         return
         [
             Image("panorama", panorama),
-            Crop("top_hud", source, topHud.ToPixels(width, height)),
             Crop("command_panel", source, commandPanel.ToPixels(width, height)),
             Crop("minimap", source, minimap.ToPixels(width, height)),
         ];

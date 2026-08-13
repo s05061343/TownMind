@@ -162,6 +162,6 @@ Ctrl + Shift + C   開啟／解除滑鼠穿透
 ## 已知限制
 
 - `scan-live` 是單幀掃描；持續刷新請使用 `overlay`。
-- GDI Capture 已通過 2560×1440 全螢幕實機驗證；其他顯示模式仍未驗證。
+- 視窗截圖改用 `PrintWindow(PW_RENDERFULLCONTENT)`（見 [decisions/0012](../decisions/0012-window-capture-and-foreground-focus.md)），只反映遊戲視窗自身畫面，不受 Overlay 或其他疊加視窗影響；已通過 2560×1440 全螢幕實機驗證，其他顯示模式仍未驗證。
 - 現有四張樣本都屬黑暗時代；封建、城堡、帝王、Alt+Tab 與遊戲結束仍需追加實機資料。
 - 已辨識主選單暫停畫面並停止建議；其他暫停型態仍需新增樣本。

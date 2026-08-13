@@ -50,6 +50,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_settings.LlmPlanningTimeoutSeconds));
             var started = Stopwatch.StartNew();
+            var effectiveScope = context.PreviousPlan is null ? PlanUpdateScope.Major : context.AllowedUpdateScope;
             var userContent = new List<object>();
             if (context.Visual is { } visual)
             {
@@ -59,7 +60,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     image_url = new { url = $"data:{image.MimeType};base64,{Convert.ToBase64String(image.Data)}" },
                 }));
             }
-            userContent.Add(new { type = "text", text = JsonSerializer.Serialize(ToPromptContext(context), JsonOptions) });
+            userContent.Add(new { type = "text", text = JsonSerializer.Serialize(ToPromptContext(context, effectiveScope), JsonOptions) });
             var request = new
             {
                 model = "agepilot-local",
@@ -70,7 +71,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     new { role = "system", content = SystemPrompt },
                     new { role = "user", content = userContent.ToArray() },
                 },
-                response_format = ResponseFormat,
+                response_format = BuildResponseFormat(effectiveScope),
             };
             using var response = await _http.PostAsJsonAsync("v1/chat/completions", request, JsonOptions, timeout.Token);
             response.EnsureSuccessStatusCode();
@@ -80,23 +81,22 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
                 ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
             var now = DateTimeOffset.UtcNow;
+            if (dto.Action is null) throw new InvalidDataException("模型未回傳滑鼠動作");
+            if (dto.MinorDecision is null) throw new InvalidDataException("模型未回傳 Minor 判斷");
             var toolAction = new VisualToolAction(dto.Action.Tool, dto.Action.Space, dto.Action.Target ?? "", dto.Action.X, dto.Action.Y,
                 dto.Action.EndX, dto.Action.EndY, dto.Action.Row, dto.Action.Column);
             var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, toolAction,
                 dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence, dto.PreviousActionResult);
-            var action = new PlannedAction(PlannedActionKind.Reobserve, 80, dto.Reason,
-                RecheckSeconds: Math.Clamp((int)Math.Ceiling(dto.RecheckAfterMs / 1000d), 5, 30),
-                SuccessCondition: dto.ExpectedResult);
-            var major = ToDecision(dto.MajorDecision, DecisionLevel.Major);
-            var medium = ToDecision(dto.MediumDecision, DecisionLevel.Medium);
-            var minor = ToDecision(dto.MinorDecision, DecisionLevel.Minor);
+            var (major, medium, minor) = AssembleDecisions(
+                dto.MajorDecision is { } majorDto ? ToDecision(majorDto, DecisionLevel.Major) : null,
+                dto.MediumDecision is { } mediumDto ? ToDecision(mediumDto, DecisionLevel.Medium) : null,
+                ToDecision(dto.MinorDecision, DecisionLevel.Minor),
+                context.PreviousPlan, effectiveScope);
             var plan = new GamePlan(Guid.NewGuid().ToString("N"), now, now.AddSeconds(60),
                 context.Directive?.Strategy ?? "穩定發展經濟並升時代", minor.Objective, dto.Reason, dto.Confidence,
-                [], [], [action], VisualDecision: decision, MajorDecision: major, MediumDecision: medium, MinorDecision: minor,
+                VisualDecision: decision, MajorDecision: major, MediumDecision: medium, MinorDecision: minor,
                 RequestedUpdateScope: dto.RequestedUpdateScope);
             var validated = GamePlanValidator.Validate(plan, now);
-            if (validated.Success && context.PreviousPlan is { } previous && !FrozenParentsMatch(previous, plan, context.AllowedUpdateScope))
-                validated = new(null, "LLM 越級改寫已凍結的上層判斷");
             _logger?.Write("planning.completed", new { backend = _backend, latencyMs = started.ElapsedMilliseconds, validated = validated.Success, validated.Error });
             SetStatus(validated.Success ? PlannerRuntimePhase.Ready : PlannerRuntimePhase.Error,
                 validated.Success ? $"LLM 已就緒（{FormatBackend()}）" : $"計畫格式驗證失敗：{validated.Error}", FormatBackend());
@@ -111,67 +111,6 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             return new(null, message);
         }
         finally { _gate.Release(); }
-    }
-
-    public static PlannedAction NormalizeQuantities(PlannedAction action, AgePilot.Core.GameState state, MapContext? map = null)
-    {
-        if (action.Intent == PlannedActionKind.BuildHouse)
-        {
-            var quantity = Math.Max(1, action.Quantity);
-            var currentCap = state.PopulationCap?.IsUsable == true ? state.PopulationCap.Value.GetValueOrDefault() : 0;
-            if (currentCap > 0)
-            {
-                var targetCap = currentCap + quantity * 5;
-                action = action with
-                {
-                    Quantity = quantity,
-                    TargetPopulationCap = targetCap,
-                    SuccessCondition = $"人口上限由 {currentCap} 提高到至少 {targetCap}",
-                };
-            }
-        }
-
-        var workerTotal = action.TargetFoodWorkers + action.TargetWoodWorkers + action.TargetGoldWorkers + action.TargetStoneWorkers;
-        var population = state.Population?.IsUsable == true ? state.Population.Value.GetValueOrDefault() : 0;
-        var estimatedWorkers = population > 1 ? population - 1 : population;
-        if (workerTotal == 0 && estimatedWorkers > 0)
-        {
-            var ratios = state.Age switch
-            {
-                AgePilot.Core.GameAge.Feudal => new[] { 0.55, 0.30, 0.15, 0.0 },
-                AgePilot.Core.GameAge.Castle or AgePilot.Core.GameAge.Imperial => new[] { 0.45, 0.30, 0.20, 0.05 },
-                _ when map?.Archetype is MapArchetype.Island or MapArchetype.Coastal => new[] { 0.55, 0.35, 0.10, 0.0 },
-                _ => new[] { 0.60, 0.30, 0.10, 0.0 },
-            };
-            action = action with
-            {
-                TargetFoodWorkers = (int)Math.Round(estimatedWorkers * ratios[0]),
-                TargetWoodWorkers = (int)Math.Round(estimatedWorkers * ratios[1]),
-                TargetGoldWorkers = (int)Math.Round(estimatedWorkers * ratios[2]),
-                TargetStoneWorkers = (int)Math.Round(estimatedWorkers * ratios[3]),
-            };
-            workerTotal = action.TargetFoodWorkers + action.TargetWoodWorkers + action.TargetGoldWorkers + action.TargetStoneWorkers;
-        }
-        if (workerTotal > 0 && estimatedWorkers > 0 && workerTotal != estimatedWorkers)
-        {
-            var raw = new[] { action.TargetFoodWorkers, action.TargetWoodWorkers, action.TargetGoldWorkers, action.TargetStoneWorkers };
-            var scaled = raw.Select(value => value * estimatedWorkers / (double)workerTotal).ToArray();
-            var targets = scaled.Select(value => (int)Math.Floor(value)).ToArray();
-            for (var remaining = estimatedWorkers - targets.Sum(); remaining > 0; remaining--)
-            {
-                var index = Enumerable.Range(0, targets.Length)
-                    .OrderByDescending(i => scaled[i] - targets[i])
-                    .ThenBy(i => i)
-                    .First();
-                targets[index]++;
-            }
-            action = action with
-            {
-                TargetFoodWorkers = targets[0], TargetWoodWorkers = targets[1],
-                TargetGoldWorkers = targets[2], TargetStoneWorkers = targets[3],
-            };
-        }
-        return action;
     }
 
     private async Task EnsureStartedAsync(CancellationToken cancellationToken)
@@ -209,7 +148,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                 {
                     FileName = executable,
                     WorkingDirectory = Path.GetDirectoryName(executable)!,
-                    Arguments = $"-m \"{model}\" --mmproj \"{mmproj}\" --mmproj-offload --image-min-tokens 1024 --image-max-tokens 1024 --host 127.0.0.1 --port {_settings.LlmPort} -c {_settings.LlmContextSize} --n-gpu-layers {_settings.LlmGpuLayers} --cache-ram 0 --alias agepilot-local --jinja -np 1 --device {device}",
+                    Arguments = $"-m \"{model}\" --mmproj \"{mmproj}\" --mmproj-offload --image-min-tokens 256 --image-max-tokens 1024 --host 127.0.0.1 --port {_settings.LlmPort} -c {_settings.LlmContextSize} --n-gpu-layers {_settings.LlmGpuLayers} --cache-ram 0 --alias agepilot-local --jinja -np 1 --device {device}",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -310,7 +249,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         catch (HttpRequestException) { return false; }
     }
 
-    private static object ToPromptContext(SituationContext context) => new
+    private static object ToPromptContext(SituationContext context, PlanUpdateScope scope) => new
     {
         capturedAt = context.CapturedAt,
         directive = context.Directive is null ? null : new
@@ -318,7 +257,13 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             context.Directive.Strategy,
             targetAge = context.Directive.TargetAge.ToString(),
         },
-        allowedUpdateScope = context.AllowedUpdateScope.ToString(),
+        allowedUpdateScope = scope.ToString(),
+        outputFields = OutputFields(scope),
+        frozenDecisions = new
+        {
+            major = scope < PlanUpdateScope.Major ? context.PreviousPlan?.MajorDecision : null,
+            medium = scope < PlanUpdateScope.Medium ? context.PreviousPlan?.MediumDecision : null,
+        },
         state = new
         {
             age = context.State.Age?.ToString(),
@@ -352,16 +297,30 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         ? new { value.Value, value.Confidence, value.ObservedAt }
         : null;
 
+    private static string[] OutputFields(PlanUpdateScope scope)
+    {
+        var fields = new List<string> { "minorDecision" };
+        if (scope >= PlanUpdateScope.Medium) fields.Add("mediumDecision");
+        if (scope >= PlanUpdateScope.Major) fields.Add("majorDecision");
+        return fields.ToArray();
+    }
+
     private static DecisionNode ToDecision(DecisionDto dto, DecisionLevel level) => new(
         dto.NodeId, level, dto.Objective, dto.Reason, dto.Evidence,
         dto.CompletionCondition, dto.FailureCondition, dto.Status);
 
-    private static bool FrozenParentsMatch(GamePlan previous, GamePlan next, PlanUpdateScope scope) => scope switch
+    public static (DecisionNode Major, DecisionNode Medium, DecisionNode Minor) AssembleDecisions(
+        DecisionNode? major, DecisionNode? medium, DecisionNode? minor, GamePlan? previous, PlanUpdateScope scope)
     {
-        PlanUpdateScope.Major => true,
-        PlanUpdateScope.Medium => previous.MajorDecision == next.MajorDecision,
-        _ => previous.MajorDecision == next.MajorDecision && previous.MediumDecision == next.MediumDecision,
-    };
+        if (minor is null) throw new InvalidDataException("模型未回傳 Minor 判斷");
+        var resolvedMedium = scope >= PlanUpdateScope.Medium
+            ? medium ?? throw new InvalidDataException("模型未回傳 Medium 判斷")
+            : previous?.MediumDecision ?? throw new InvalidOperationException("缺少前一份 Medium 判斷可供沿用");
+        var resolvedMajor = scope >= PlanUpdateScope.Major
+            ? major ?? throw new InvalidDataException("模型未回傳 Major 判斷")
+            : previous?.MajorDecision ?? throw new InvalidOperationException("缺少前一份 Major 判斷可供沿用");
+        return (resolvedMajor, resolvedMedium, minor);
+    }
 
     private static string Resolve(string path)
     {
@@ -404,7 +363,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     private const string SystemPrompt = """
 /no_think
-你是謹慎的 AOE2 DE 經濟發展玩家。玩家的 directive 是不可改寫的長期策略與最終目標時代。你必須維護 Major、Medium、Minor 三層判斷：Major 是目前升時代階段，Medium 是達成它的方法（例如生產村民、避免卡人口、依可見證據選羊、果樹、野生動物或其他食物來源），Minor 是現在要完成的具體小目標。allowedUpdateScope=Minor 時必須原樣保留 previousPlan 的 Major 與 Medium；Medium 時必須原樣保留 Major；只有 Major 才能重建三層。正常情況 requestedUpdateScope 必須等於 allowedUpdateScope；若畫面證明凍結的父層已失效，先保留它並把 requestedUpdateScope 提升到所需層級，程式會在下一輪授權重算。每個節點都要寫明畫面證據、完成條件與失敗條件。所有遊戲操作只能使用滑鼠，禁止快捷鍵與鍵盤輸入。panorama 是完整遊戲畫面；command_panel 是左下指令面板；minimap 是右下小地圖。每輪只輸出一個原子工具：Observe、Wait、LeftClick、RightClick 或 Drag。世界目標使用 Panorama normalized 座標；小地圖使用 Minimap 局部 normalized 座標；命令按鈕使用 CommandGrid 的 row 1..3、column 1..5，不得猜全畫面小圖示座標。每個輸入動作都必須用 target 簡述畫面上可見的目標證據。選取村民或建築後，下一輪必須從單位資訊與命令面板確認選取結果；未確認前只能 Observe 或 Wait。若 context 有 previousAction，先設定 previousActionResult；無法確認時必須 Uncertain 且不得提出新輸入。紅色建築預覽不可確認。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。不要輸出 Markdown，嚴格依 JSON schema 回覆。
+你是謹慎的 AOE2 DE 經濟發展玩家。玩家的 directive 是不可改寫的長期策略與最終目標時代。你必須維護 Major、Medium、Minor 三層判斷：Major 是目前升時代階段，Medium 是達成它的方法（例如生產村民、避免卡人口、依可見證據選羊、果樹、野生動物或其他食物來源），Minor 是現在要完成的具體小目標。context.outputFields 列出這一輪你能輸出哪些層級（一定包含 minorDecision，可能包含 mediumDecision、majorDecision）；沒有列在 outputFields 裡的層級，系統會直接沿用 context.frozenDecisions 裡的內容，你的回覆裡不會有、也不能有那個欄位，不需要嘗試重寫它。若你認為 frozenDecisions 裡的層級已經不成立，把 requestedUpdateScope 設成需要的層級，下一輪系統才會把它加進 outputFields 讓你重建；這一輪仍然只能照 outputFields 輸出。正常情況 requestedUpdateScope 等於 allowedUpdateScope。nodeId 只能用英文字母、數字、-、_，長度 1-80，且不可以跟 frozenDecisions 裡任何 nodeId 相同。每個節點都要寫明畫面證據、完成條件與失敗條件。所有遊戲操作只能使用滑鼠，禁止快捷鍵與鍵盤輸入。panorama 是完整遊戲畫面；command_panel 是左下指令面板；minimap 是右下小地圖。每輪只輸出一個原子工具：Observe、Wait、LeftClick、RightClick 或 Drag。世界目標使用 Panorama normalized 座標；小地圖使用 Minimap 局部 normalized 座標；命令按鈕使用 CommandGrid 的 row 1..3、column 1..5，不得猜全畫面小圖示座標。每個輸入動作都必須用 target 簡述畫面上可見的目標證據。選取村民或建築後，下一輪必須從單位資訊與命令面板確認選取結果；未確認前只能 Observe 或 Wait。若 context 有 previousAction，先設定 previousActionResult；無法確認時必須 Uncertain 且不得提出新輸入。紅色建築預覽不可確認。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。不要輸出 Markdown，嚴格依 JSON schema 回覆。
 """;
 
     private static object DecisionNodeSchema() => new Dictionary<string, object>
@@ -414,7 +373,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         ["required"] = new[] { "nodeId", "objective", "reason", "evidence", "completionCondition", "failureCondition", "status" },
         ["properties"] = new Dictionary<string, object>
         {
-            ["nodeId"] = new { type = "string", maxLength = 80 },
+            ["nodeId"] = new { type = "string", maxLength = 80, pattern = "^[A-Za-z0-9_-]{1,80}$" },
             ["objective"] = new { type = "string", maxLength = 200 },
             ["reason"] = new { type = "string", maxLength = 300 },
             ["evidence"] = new { type = "string", maxLength = 300 },
@@ -424,64 +383,72 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         },
     };
 
-    private static readonly object ResponseFormat = new
+    private static object ActionSchema() => new Dictionary<string, object>
     {
-        type = "json_schema",
-        json_schema = new
+        ["type"] = "object",
+        ["additionalProperties"] = false,
+        ["required"] = new[] { "tool", "space", "target", "x", "y", "endX", "endY", "row", "column" },
+        ["properties"] = new Dictionary<string, object>
         {
-            name = "agepilot_game_plan",
-            strict = true,
-            schema = new Dictionary<string, object>
-            {
-                ["type"] = "object",
-                ["additionalProperties"] = false,
-                ["required"] = new[] { "assessment", "goal", "reason", "confidence", "requestedUpdateScope", "majorDecision", "mediumDecision", "minorDecision", "action", "expectedResult", "recheckAfterMs", "previousActionResult" },
-                ["properties"] = new Dictionary<string, object>
-                {
-                    ["assessment"] = new { type = "string" },
-                    ["goal"] = new { type = "string" },
-                    ["reason"] = new { type = "string" },
-                    ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
-                    ["expectedResult"] = new { type = "string" },
-                    ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
-                    ["previousActionResult"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PreviousActionResult>() },
-                    ["requestedUpdateScope"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PlanUpdateScope>() },
-                    ["majorDecision"] = DecisionNodeSchema(),
-                    ["mediumDecision"] = DecisionNodeSchema(),
-                    ["minorDecision"] = DecisionNodeSchema(),
-                    ["action"] = new Dictionary<string, object>
-                    {
-                        ["type"] = "object",
-                        ["additionalProperties"] = false,
-                        ["required"] = new[] { "tool", "space", "target", "x", "y", "endX", "endY", "row", "column" },
-                        ["properties"] = new Dictionary<string, object>
-                        {
-                            ["tool"] = new Dictionary<string, object>
-                            {
-                                ["type"] = "string",
-                                ["enum"] = Enum.GetNames<VisualToolKind>(),
-                            },
-                            ["space"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<VisualCoordinateSpace>() },
-                            ["target"] = new { type = "string", maxLength = 80 },
-                            ["x"] = new { type = "number", minimum = 0, maximum = 1 },
-                            ["y"] = new { type = "number", minimum = 0, maximum = 1 },
-                            ["endX"] = new { type = "number", minimum = 0, maximum = 1 },
-                            ["endY"] = new { type = "number", minimum = 0, maximum = 1 },
-                            ["row"] = new { type = "integer", minimum = 0, maximum = 3 },
-                            ["column"] = new { type = "integer", minimum = 0, maximum = 5 },
-                        },
-                    },
-                },
-            },
+            ["tool"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<VisualToolKind>() },
+            ["space"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<VisualCoordinateSpace>() },
+            ["target"] = new { type = "string", maxLength = 80 },
+            ["x"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["y"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["endX"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["endY"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["row"] = new { type = "integer", minimum = 0, maximum = 3 },
+            ["column"] = new { type = "integer", minimum = 0, maximum = 5 },
         },
     };
+
+    public static object BuildResponseFormat(PlanUpdateScope scope)
+    {
+        var required = new List<string>
+        {
+            "assessment", "goal", "reason", "confidence", "requestedUpdateScope",
+            "minorDecision", "action", "expectedResult", "recheckAfterMs", "previousActionResult",
+        };
+        var properties = new Dictionary<string, object>
+        {
+            ["assessment"] = new { type = "string" },
+            ["goal"] = new { type = "string" },
+            ["reason"] = new { type = "string" },
+            ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["expectedResult"] = new { type = "string" },
+            ["recheckAfterMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
+            ["previousActionResult"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PreviousActionResult>() },
+            ["requestedUpdateScope"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Enum.GetNames<PlanUpdateScope>() },
+            ["minorDecision"] = DecisionNodeSchema(),
+            ["action"] = ActionSchema(),
+        };
+        if (scope >= PlanUpdateScope.Medium) { required.Add("mediumDecision"); properties["mediumDecision"] = DecisionNodeSchema(); }
+        if (scope >= PlanUpdateScope.Major) { required.Add("majorDecision"); properties["majorDecision"] = DecisionNodeSchema(); }
+
+        return new
+        {
+            type = "json_schema",
+            json_schema = new
+            {
+                name = "agepilot_game_plan",
+                strict = true,
+                schema = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = required.ToArray(),
+                    ["properties"] = properties,
+                },
+            },
+        };
+    }
 
     private sealed record CompletionEnvelope(IReadOnlyList<CompletionChoice> Choices);
     private sealed record CompletionChoice(CompletionMessage Message);
     private sealed record CompletionMessage(string Content);
     private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence, PlanUpdateScope RequestedUpdateScope,
-        DecisionDto MajorDecision, DecisionDto MediumDecision, DecisionDto MinorDecision,
-        VisualActionDto Action, string ExpectedResult, int RecheckAfterMs, PreviousActionResult PreviousActionResult);
+        DecisionDto? MajorDecision, DecisionDto? MediumDecision, DecisionDto? MinorDecision,
+        VisualActionDto? Action, string ExpectedResult, int RecheckAfterMs, PreviousActionResult PreviousActionResult);
     private sealed record DecisionDto(string NodeId, string Objective, string Reason, string Evidence,
         string CompletionCondition, string FailureCondition, DecisionStatus Status);
     private sealed record VisualActionDto(VisualToolKind Tool, VisualCoordinateSpace Space, string? Target,

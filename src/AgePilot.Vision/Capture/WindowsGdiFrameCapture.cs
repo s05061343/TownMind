@@ -5,9 +5,8 @@ namespace AgePilot.Vision.Capture;
 
 public sealed class WindowsGdiFrameCapture : IFrameCapture
 {
-    private const int SourceCopy = 0x00CC0020;
-    private const int CaptureLayeredWindows = 0x40000000;
     private const uint DibRgbColors = 0;
+    private const uint PrintWindowRenderFullContent = 0x00000002;
 
     public ValueTask<CapturedFrame> CaptureAsync(
         GameWindow window,
@@ -35,7 +34,7 @@ public sealed class WindowsGdiFrameCapture : IFrameCapture
         var screenDc = GetDC(nint.Zero);
         if (screenDc == nint.Zero)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to acquire the screen device context.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to acquire a reference device context.");
         }
 
         var memoryDc = nint.Zero;
@@ -57,18 +56,9 @@ public sealed class WindowsGdiFrameCapture : IFrameCapture
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to select the capture bitmap.");
             }
 
-            if (!BitBlt(
-                    memoryDc,
-                    0,
-                    0,
-                    width,
-                    height,
-                    screenDc,
-                    bounds.Left,
-                    bounds.Top,
-                    SourceCopy | CaptureLayeredWindows))
+            if (!PrintWindow(window.Handle, memoryDc, PrintWindowRenderFullContent))
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to copy pixels from the game window.");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to render the game window into the capture bitmap.");
             }
 
             var info = new BitmapInfo
@@ -182,18 +172,9 @@ public sealed class WindowsGdiFrameCapture : IFrameCapture
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteDC(nint deviceContext);
 
-    [DllImport("gdi32.dll", SetLastError = true)]
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool BitBlt(
-        nint destination,
-        int xDestination,
-        int yDestination,
-        int width,
-        int height,
-        nint source,
-        int xSource,
-        int ySource,
-        int rasterOperation);
+    private static extern bool PrintWindow(nint window, nint deviceContext, uint flags);
 
     [DllImport("gdi32.dll", SetLastError = true)]
     private static extern int GetDIBits(

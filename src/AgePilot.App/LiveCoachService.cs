@@ -94,9 +94,8 @@ public sealed class LiveCoachService(
                         var visual = new VisualObservation(frame.Width, frame.Height,
                             VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
                                 _profile.CommandPanelRegion ?? new NormalizedRect(0, 0.66, 0.47, 0.34),
-                                _profile.MinimapRegion ?? new NormalizedRect(0.80, 0.67, 0.20, 0.33),
-                                new NormalizedRect(0, 0, 0.45, 0.06)),
-                            $"panorama=完整遊戲視窗；top_hud=資源；command_panel=左下指令；minimap=右下小地圖；所有遊戲輸入僅限滑鼠；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}；世界座標以 panorama normalized [0,1] 表示",
+                                _profile.MinimapRegion ?? new NormalizedRect(0.80, 0.67, 0.20, 0.33)),
+                            $"panorama=完整遊戲視窗；資源數值已由 OCR 以文字提供，不再附圖；command_panel=左下指令；minimap=右下小地圖；所有遊戲輸入僅限滑鼠；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}；世界座標以 panorama normalized [0,1] 表示",
                             _previousVisualAction, _previousVisualResult);
                         _history.Add(state, frame.CapturedAt);
                         var health = CalculateVisionHealth(state);

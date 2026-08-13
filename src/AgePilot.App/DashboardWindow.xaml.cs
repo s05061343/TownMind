@@ -186,8 +186,7 @@ public partial class DashboardWindow : Window
             }
             var frame = await new WindowsGdiFrameCapture().CaptureAsync(window, timeout.Token);
             var images = VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
-                new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33),
-                new NormalizedRect(0, 0, 0.45, 0.06));
+                new NormalizedRect(0, 0.66, 0.47, 0.34), new NormalizedRect(0.80, 0.67, 0.20, 0.33));
             var now = DateTimeOffset.UtcNow;
             var result = await planner.PlanAsync(new SituationContext(new GameState(),
                 GameHistorySummarizer.Summarize(new GameHistory(), TimeSpan.FromSeconds(1), now), null, null, [], now,

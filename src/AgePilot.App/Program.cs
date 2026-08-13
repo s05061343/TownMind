@@ -310,14 +310,13 @@ static async Task<int> VlmImageAsync(string imagePath)
     var image = BgraImageLoader.Load(ResolveInputPath(imagePath));
     var images = VisualPromptImageEncoder.Encode(image.Pixels, image.Width, image.Height,
         new AgePilot.Vision.Geometry.NormalizedRect(0, 0.66, 0.47, 0.34),
-        new AgePilot.Vision.Geometry.NormalizedRect(0.80, 0.67, 0.20, 0.33),
-        new AgePilot.Vision.Geometry.NormalizedRect(0, 0, 0.45, 0.06));
+        new AgePilot.Vision.Geometry.NormalizedRect(0.80, 0.67, 0.20, 0.33));
     using var planner = new LlamaServerPlanner(new AppSettings());
     var context = new SituationContext(new GameState(),
         GameHistorySummarizer.Summarize(new GameHistory(), TimeSpan.FromSeconds(1), now), null, null,
         [new PlanningEvent("visual_smoke", "請判斷目前畫面並提出一個安全的下一步；紅色建築預覽代表非法落點", now)], now,
         new VisualObservation(image.Width, image.Height, images,
-            "top_hud=resources; command_panel=bottom-left; minimap=bottom-right; world=center", null, null));
+            "command_panel=bottom-left; minimap=bottom-right; world=center; resource numbers are provided as OCR text, not an image", null, null));
     var result = await planner.PlanAsync(context, CancellationToken.None);
     if (!result.Success) { Console.Error.WriteLine(result.Error); return 8; }
     Console.WriteLine(JsonSerializer.Serialize(result.Plan!.VisualDecision,

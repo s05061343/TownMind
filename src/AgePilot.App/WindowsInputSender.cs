@@ -93,6 +93,11 @@ internal sealed class WindowsInputSender : IMouseProbeBackend
     {
         game = _locator.Find()!;
         if (game is null) { status = "找不到 AOE2 視窗"; return false; }
+        if (GetForegroundWindow() != game.Handle)
+        {
+            _ = SetForegroundWindow(game.Handle);
+            Thread.Sleep(80);
+        }
         if (GetForegroundWindow() != game.Handle) { status = "AOE2 不是前景視窗"; return false; }
         if (!GetWindowRect(game.Handle, out var bounds))
         { status = $"無法讀取 AOE2 視窗範圍，Win32={Marshal.GetLastWin32Error()}"; return false; }

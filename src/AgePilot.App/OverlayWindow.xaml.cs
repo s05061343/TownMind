@@ -22,6 +22,7 @@ public partial class OverlayWindow : Window
     private const int WindowMessageHotKey = 0x0312;
     private const int ExtendedStyleIndex = -20;
     private const int ExtendedStyleTransparent = 0x20;
+    private const int ExtendedStyleNoActivate = 0x08000000;
     private const uint ModifierControl = 0x0002;
     private const uint ModifierShift = 0x0004;
     private const uint VirtualKeyA = 0x41;
@@ -159,6 +160,8 @@ public partial class OverlayWindow : Window
         _windowHandle = new WindowInteropHelper(this).Handle;
         var source = HwndSource.FromHwnd(_windowHandle);
         source?.AddHook(WindowMessageHook);
+        var style = GetWindowLongPtr(_windowHandle, ExtendedStyleIndex).ToInt64();
+        _ = SetWindowLongPtr(_windowHandle, ExtendedStyleIndex, new nint(style | ExtendedStyleNoActivate));
         _ = RegisterHotKey(_windowHandle, HotKeyToggleVisibility, ModifierControl | ModifierShift, VirtualKeyA);
         _ = RegisterHotKey(_windowHandle, HotKeyToggleClickThrough, ModifierControl | ModifierShift, VirtualKeyC);
         _stopHotKeyRegistered = RegisterAutomationHotKeys();
