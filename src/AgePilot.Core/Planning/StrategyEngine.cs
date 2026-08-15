@@ -9,6 +9,7 @@ public sealed class StrategyEngine : IDisposable
     private readonly bool _ownsPlanner;
     private GamePlan? _current;
     private Task<PlanningResult>? _pending;
+    private IVisualRequestLease? _pendingVisualLease;
     private PlanUpdateScope? _pendingScope;
     private PlanUpdateScope? _requestedScope = PlanUpdateScope.Major;
     private PlanUpdateScope? _retryScope;
@@ -31,12 +32,24 @@ public sealed class StrategyEngine : IDisposable
 
     public Task<(GamePlan? Plan, string? Status)> UpdateAsync(
         GameState state, GameHistory history, MapContext? map, DateTimeOffset now, CancellationToken cancellationToken,
-        VisualObservation? visual = null)
+        VisualObservation? visual = null,
+        Func<VisualRequestContext, IVisualRequestLease?>? visualFactory = null)
     {
         if (_pending?.IsCompleted == true)
         {
-            var result = _pending.GetAwaiter().GetResult();
+            PlanningResult result;
+            try
+            {
+                result = _pending.GetAwaiter().GetResult();
+                _pendingVisualLease?.Complete(result.Success);
+            }
+            catch
+            {
+                _pendingVisualLease?.Complete(false);
+                throw;
+            }
             _pending = null;
+            _pendingVisualLease = null;
             if (result.Success)
             {
                 var completedScope = _pendingScope ?? PlanUpdateScope.Major;
@@ -82,9 +95,23 @@ public sealed class StrategyEngine : IDisposable
             else if (mapChanged) events.Add(new PlanningEvent("map_changed", "可用地形判斷改變", now, PlanUpdateScope.Medium));
             else if (populationChanged) events.Add(new PlanningEvent("population_gate_changed",
                 $"人口壓力狀態改變為 {populationPressure}", now));
-            var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
-                map?.IsUsable == true ? map : null, _current, events, now, visual, _directive, scope);
-            _pending = _planner.PlanAsync(context, cancellationToken);
+            try
+            {
+                var visualContext = new VisualRequestContext(scope, events, now);
+                _pendingVisualLease = visualFactory?.Invoke(visualContext);
+                var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
+                    map?.IsUsable == true ? map : null, _current, events, now,
+                    _pendingVisualLease?.Observation ?? visual, _directive, scope);
+                _pending = _planner.PlanAsync(context, cancellationToken);
+            }
+            catch
+            {
+                _pendingVisualLease?.Complete(false);
+                _pendingVisualLease = null;
+                _pendingScope = null;
+                Request(scope);
+                throw;
+            }
         }
 
         var current = Current(now);

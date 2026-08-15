@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "source": "../../doc/Snipaste_2026-08-09_16-29-15.jpg",
+  "profile": "../../config/hud/aoe2de-zh-tw-2560x1440-50.json",
+  "regions": {
+    "battlefield": { "x": 0, "y": 64, "width": 2560, "height": 887, "encodedWidth": 1536, "encodedHeight": 532, "pHash": "41A6BCF9C3DB0E24", "maxHammingDistance": 2 },
+    "command_panel": { "x": 0, "y": 950, "width": 1204, "height": 490, "encodedWidth": 1204, "encodedHeight": 490, "pHash": "74ECCAA73CA4C25A", "maxHammingDistance": 2 },
+    "minimap": { "x": 2062, "y": 971, "width": 482, "height": 457, "encodedWidth": 482, "encodedHeight": 457, "pHash": "53B8A842FF472C3A", "maxHammingDistance": 2 }
+  }
+}

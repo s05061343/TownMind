@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 2560 1440">
+  <image href="../../doc/Snipaste_2026-08-09_16-29-15.jpg" x="0" y="0" width="2560" height="1440"/>
+  <rect x="0" y="64" width="2560" height="887" fill="none" stroke="#35e06f" stroke-width="8"/>
+  <text x="24" y="112" fill="#35e06f" font-size="38" font-family="sans-serif" font-weight="bold">battlefield 0,64 2560x887</text>
+  <rect x="0" y="950" width="1204" height="490" fill="none" stroke="#ff9f2f" stroke-width="8"/>
+  <text x="24" y="1002" fill="#ff9f2f" font-size="38" font-family="sans-serif" font-weight="bold">command_panel 0,950 1204x490</text>
+  <rect x="2062" y="971" width="482" height="457" fill="none" stroke="#39a8ff" stroke-width="8"/>
+  <text x="2078" y="1020" fill="#39a8ff" font-size="32" font-family="sans-serif" font-weight="bold">minimap</text>
+</svg>

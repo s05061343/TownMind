@@ -39,6 +39,7 @@ public sealed class LiveCoachService(
     private readonly ISessionRepository? _sessions = sessionRepository;
     private readonly HashSet<string> _activeRecommendationIds = [];
     private AdaptiveHudOcrAnalyzer? _adaptiveOcr;
+    private VisualPromptComposer? _visualComposer;
     private long? _sessionId;
     private DateTimeOffset _lastSnapshotAt = DateTimeOffset.MinValue;
     private GameLifecycleState? _lastLoggedLifecycle;
@@ -56,6 +57,8 @@ public sealed class LiveCoachService(
             await _sessions.InitializeAsync(cancellationToken);
         }
         _adaptiveOcr ??= new AdaptiveHudOcrAnalyzer(_ocr, _profile);
+        _visualComposer ??= new VisualPromptComposer(
+            VlmPipelinePresetCatalog.Get(settings.VlmPipelinePresetId), _profile);
 
         try
         {
@@ -79,6 +82,7 @@ public sealed class LiveCoachService(
                         _ = _lifecycle.ObserveWindow(true);
                         await EnsureSessionAsync(cycleStartedAt, cancellationToken);
                         var frame = await _capture.CaptureAsync(window, cancellationToken);
+                        _visualComposer.ObserveFrame(frame.BgraPixels.Span, frame.Width, frame.Height, frame.CapturedAt);
                         var raw = _adaptiveOcr.AnalyzeFrame(
                             frame.BgraPixels, frame.Width, frame.Height, frame.CapturedAt);
                         if (raw.IsPauseMenuVisible)
@@ -94,17 +98,15 @@ public sealed class LiveCoachService(
                         var state = _estimator.Update(raw, frame.CapturedAt);
                         LogPopulationOcr(raw, state);
                         var map = _minimapAnalyzer.Analyze(frame.BgraPixels.Span, frame.Width, frame.Height, _profile.MinimapRegion, frame.CapturedAt);
-                        var visual = new VisualObservation(frame.Width, frame.Height,
-                            VisualPromptImageEncoder.Encode(frame.BgraPixels.Span, frame.Width, frame.Height,
-                                _profile.CommandPanelRegion ?? new NormalizedRect(0, 0.66, 0.47, 0.34),
-                                _profile.MinimapRegion ?? new NormalizedRect(0.80, 0.67, 0.20, 0.33)),
-                            $"panorama=完整遊戲視窗；資源數值已由 OCR 以文字提供，不再附圖；command_panel=左下指令；minimap=右下小地圖；執行層使用已確認的遊戲快捷鍵與固定安全落點；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}",
-                            _previousVisualAction, _previousVisualResult);
                         _history.Add(state, frame.CapturedAt);
                         var health = CalculateVisionHealth(state);
                         var lifecycle = _lifecycle.ObserveFrame(false, 6 - health.UnavailableFields);
                         var planning = lifecycle == GameLifecycleState.GameActive
-                            ? await _strategy.UpdateAsync(state, _history, map, frame.CapturedAt, cancellationToken, visual)
+                            ? await _strategy.UpdateAsync(state, _history, map, frame.CapturedAt, cancellationToken,
+                                visualFactory: request => _visualComposer.Compose(
+                                    frame.BgraPixels.Span, frame.Width, frame.Height, request,
+                                    $"battlefield=純世界視野；minimap=右下小地圖；command_panel 只在 inclusion reason 存在時提供；資源與時代由 OCR 文字提供；CommandGrid={_profile.CommandGridRows}x{_profile.CommandGridColumns}",
+                                    _previousVisualAction, _previousVisualResult))
                             : _strategy.Pause(frame.CapturedAt, "等待可靠的 Active 遊戲狀態");
                         var activeRecommendations = GamePlanRecommendationAdapter.Convert(planning.Plan);
                         var visibleRecommendations = _recommendationCoordinator.Apply(activeRecommendations);

@@ -411,6 +411,9 @@ public partial class DashboardWindow : Window
             LlmContextSize = _settings.LlmContextSize,
             LlmGpuLayers = _settings.LlmGpuLayers,
             LlmPlanningTimeoutSeconds = _settings.LlmPlanningTimeoutSeconds,
+            VlmPipelinePresetId = _settings.VlmPipelinePresetId,
+            GamePlanContractId = _settings.GamePlanContractId,
+            LlmSeed = _settings.LlmSeed,
         };
         settings.Validate();
         return settings;

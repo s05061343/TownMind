@@ -26,6 +26,8 @@ public sealed class HudProfile
 
     public NormalizedRect? CommandPanelRegion { get; init; }
 
+    public NormalizedRect? BattlefieldRegion { get; init; }
+
     public NormalizedRect? CommandGridRegion { get; init; }
 
     public int CommandGridRows { get; init; }
@@ -63,6 +65,9 @@ public sealed class HudProfile
         PauseMenuRegion?.Validate();
         MinimapRegion?.Validate();
         CommandPanelRegion?.Validate();
+        if (BattlefieldRegion is null)
+            throw new InvalidDataException("HUD profile is missing required battlefield region.");
+        BattlefieldRegion.Value.Validate();
         CommandGridRegion?.Validate();
         if (CommandGridRegion is not null && (CommandGridRows <= 0 || CommandGridColumns <= 0))
             throw new InvalidDataException("Command grid dimensions must be positive.");

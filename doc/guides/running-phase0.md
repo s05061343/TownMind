@@ -143,6 +143,35 @@ dotnet run --no-build --project src\AgePilot.App -- live-benchmark `
 
 第三個命令必須在 AOE2 DE 對局視窗存在時執行，範例會量測五分鐘 Live Capture。遊戲不存在時會以 exit code 2 fail closed，不會建立假的成功報告。遊戲 FPS 仍需由遊戲內或外部效能工具同時記錄 baseline 與 AgePilot 開啟後的差異。
 
+## VLM image pipeline benchmark
+
+先執行不載入模型的 deterministic sequence replay：
+
+```powershell
+dotnet run --no-build --project src\AgePilot.App -- vlm-sequence-report `
+  "testdata\vlm\manifest.json" "artifacts\reports\vlm-sequence.json"
+```
+
+完整 paired A/B 會依 manifest 載入本機 Qwen3-VL、逐 preset warm-up，並以固定 seed 對每個 snapshot 跑三次：
+
+```powershell
+dotnet run --no-build --project src\AgePilot.App -- vlm-ab-report `
+  "testdata\vlm\manifest.json" "artifacts\reports\vlm-ab.json"
+```
+
+初始 manifest 刻意保留缺少的 coverage tags，因此目前不能 promotion。補齊四時代、選取狀態、panel 動畫、minimap、不可用觀測與 request failure sequences 後才可判讀 Promotion Gate。報告不保存圖片或 base64。
+
+## GamePlan contract benchmark
+
+以下命令固定使用 `legacy-3-1024-v1` 影像 preset，只比較 `legacy-v1` 與 `compact-v2` wire contract；依 Major／Medium／Minor 分開報 completion tokens、decode、E2E、action parity 與 token budget：
+
+```powershell
+dotnet run --no-build --project src\AgePilot.App -- gameplan-contract-report `
+  "testdata\vlm\manifest.json" "artifacts\reports\gameplan-contract.json"
+```
+
+目前 `GamePlanContractId` 預設仍為 `legacy-v1`。初始 manifest coverage 不完整時報告必須拒絕 promotion；不得用單一黑暗時代 snapshot 改正式 contract。contract A/B 必須保持 image preset 固定，通過後才另測 `compact-v2 + event-panel-640-v1`。
+
 ## 啟動 Playable Prototype Overlay
 
 先啟動 AOE2 並進入對局，再執行：

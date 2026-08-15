@@ -28,6 +28,9 @@ public sealed class AppSettings
     public int LlmContextSize { get; set; } = 8192;
     public int LlmGpuLayers { get; set; } = 99;
     public int LlmPlanningTimeoutSeconds { get; set; } = 30;
+    public string VlmPipelinePresetId { get; set; } = VlmPipelinePresetCatalog.Legacy.Id;
+    public string GamePlanContractId { get; set; } = GamePlanContractCatalog.Legacy.Id;
+    public int LlmSeed { get; set; } = -1;
 
     public void Validate()
     {
@@ -48,5 +51,7 @@ public sealed class AppSettings
         if (LlmPort is < 1024 or > 65535) throw new InvalidDataException("LLM port 必須介於 1024 與 65535。");
         if (LlmContextSize is < 2048 or > 32768) throw new InvalidDataException("LLM context size 超出支援範圍。");
         if (LlmPlanningTimeoutSeconds is < 5 or > 120) throw new InvalidDataException("LLM 規劃逾時必須介於 5 與 120 秒。");
+        _ = VlmPipelinePresetCatalog.Get(VlmPipelinePresetId);
+        _ = GamePlanContractCatalog.Get(GamePlanContractId);
     }
 }

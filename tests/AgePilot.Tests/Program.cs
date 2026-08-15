@@ -10,6 +10,8 @@ using AgePilot.Vision.Benchmarking;
 using AgePilot.Vision.Observations;
 using AgePilot.Vision.Ocr;
 using AgePilot.Vision.Profiles;
+using AgePilot.Vision.Images;
+using OpenCvSharp;
 
 var tests = new (string Name, Action Run)[]
 {
@@ -23,9 +25,21 @@ var tests = new (string Name, Action Run)[]
     ("Population-dependent actions fail closed", PopulationDependentActionsFailClosed),
     ("House pressure blocks villagers and allows houses", HousePressureSelectsHouse),
     ("Planner schema exposes only state-safe actions", PlannerSchemaUsesSafeActions),
+    ("GamePlan contracts are versioned with scoped budgets", GamePlanContractsAreVersioned),
+    ("Compact schema emits only the allowed decision scopes", CompactSchemaFollowsScope),
+    ("Compact adapter preserves execution semantics deterministically", CompactAdapterIsDeterministic),
+    ("Compact adapter rejects invalid enum and scope combinations", CompactAdapterFailsClosed),
     ("Crossing the house threshold requests Minor replanning", HouseThresholdTriggersMinorReplan),
     ("Live trace setting is removed", LiveTraceSettingIsRemoved),
     ("Legacy live trace setting is removed on load", LegacyLiveTraceSettingIsRemovedOnLoad),
+    ("VLM presets are immutable and validated", VlmPresetsAreValidated),
+    ("Battlefield ROI maps to the reviewed calibration rectangle", BattlefieldRoiMapsExactly),
+    ("Battlefield composition preserves aspect ratio", BattlefieldCompositionPreservesAspectRatio),
+    ("Golden ROI content stays perceptually stable", GoldenRoiContentStaysPerceptuallyStable),
+    ("Panel hash separates stable attempted and accepted evidence", PanelHashSeparatesEvidence),
+    ("Rejected panel request does not consume evidence", RejectedPanelRequestDoesNotConsumeEvidence),
+    ("Visual encoding is lazy until planning requests it", VisualEncodingIsLazy),
+    ("Visual composition failure keeps planning request pending", VisualCompositionFailureKeepsRequestPending),
     ("Screenshot manifest OCR remains exact", ScreenshotManifestOcrRemainsExact),
 };
 
@@ -212,6 +226,217 @@ static void LegacyLiveTraceSettingIsRemovedOnLoad()
     }
 }
 
+static void GamePlanContractsAreVersioned()
+{
+    Equal("legacy-v1", GamePlanContractCatalog.Legacy.Id);
+    Equal("compact-v2", GamePlanContractCatalog.CompactV2.Id);
+    Equal(64, GamePlanContractCatalog.CompactV2.CompletionBudgets[PlanUpdateScope.Minor].TargetMedian);
+    Equal(96, GamePlanContractCatalog.CompactV2.CompletionBudgets[PlanUpdateScope.Major].TargetMedian);
+    Equal(200, GamePlanContractCatalog.CompactV2.CompletionBudgets[PlanUpdateScope.Major].PromotionCeiling);
+    Equal(256, GamePlanContractCatalog.CompactV2.CompletionBudgets[PlanUpdateScope.Major].HardCap);
+}
+
+static void CompactSchemaFollowsScope()
+{
+    var minor = System.Text.Json.JsonSerializer.Serialize(LlamaServerPlanner.BuildCompactResponseFormat(
+        PlanUpdateScope.Minor, [GameActionKind.Observe]));
+    Equal(true, minor.Contains("\"minor\"", StringComparison.Ordinal));
+    Equal(false, minor.Contains("\"medium\":", StringComparison.Ordinal));
+    Equal(false, minor.Contains("\"major\":", StringComparison.Ordinal));
+    Equal(false, minor.Contains("assessment", StringComparison.Ordinal));
+    Equal(false, minor.Contains("expectedResult", StringComparison.Ordinal));
+
+    var major = System.Text.Json.JsonSerializer.Serialize(LlamaServerPlanner.BuildCompactResponseFormat(
+        PlanUpdateScope.Major, [GameActionKind.BuildHouse]));
+    Equal(true, major.Contains("\"medium\":", StringComparison.Ordinal));
+    Equal(true, major.Contains("\"major\":", StringComparison.Ordinal));
+    Equal(false, major.Contains("quantity", StringComparison.Ordinal));
+}
+
+static void CompactAdapterIsDeterministic()
+{
+    var now = DateTimeOffset.UnixEpoch.AddSeconds(10);
+    var state = State(18, 20);
+    var context = new SituationContext(state,
+        GameHistorySummarizer.Summarize(new GameHistory(), TimeSpan.FromSeconds(1), now), null, null, [], now,
+        Directive: new StrategyDirective("test", GameAge.Castle), AllowedUpdateScope: PlanUpdateScope.Major);
+    var response = new CompactGamePlanResponse(GameActionKind.BuildHouse, .91, 1500,
+        PlanReasonCode.PopulationCap, PlanScopeEscalation.None, MinorPlanIntent.PreventPopulationBlock,
+        MediumPlanIntent.GrowEconomy, MajorPlanIntent.AdvanceAge);
+    var first = CompactGamePlanAdapter.Adapt(response, context, PlanUpdateScope.Major, now);
+    var second = CompactGamePlanAdapter.Adapt(response, context, PlanUpdateScope.Major, now.AddMilliseconds(1));
+    Equal(true, first.Success);
+    Equal(GameActionKind.BuildHouse, first.Plan!.VisualDecision!.Action.Kind);
+    Equal(1, first.Plan.VisualDecision.Action.Quantity);
+    Equal(first.Plan.MajorDecision!.NodeId, second.Plan!.MajorDecision!.NodeId);
+    Equal(first.Plan.MediumDecision!.NodeId, second.Plan.MediumDecision!.NodeId);
+    Equal(first.Plan.MinorDecision!.NodeId, second.Plan.MinorDecision!.NodeId);
+    Equal(true, first.Plan.MinorDecision.Evidence.Contains("18/20", StringComparison.Ordinal));
+}
+
+static void CompactAdapterFailsClosed()
+{
+    var now = DateTimeOffset.UnixEpoch.AddSeconds(10);
+    var previous = Plan(now);
+    var context = new SituationContext(State(17, 20),
+        GameHistorySummarizer.Summarize(new GameHistory(), TimeSpan.FromSeconds(1), now), null, previous, [], now,
+        Directive: new StrategyDirective("test", GameAge.Castle), AllowedUpdateScope: PlanUpdateScope.Minor);
+    var unknown = new CompactGamePlanResponse(GameActionKind.QueueVillager, .9, 1000,
+        (PlanReasonCode)999, PlanScopeEscalation.None, MinorPlanIntent.MaintainVillagerProduction);
+    Equal(false, CompactGamePlanAdapter.Adapt(unknown, context, PlanUpdateScope.Minor, now).Success);
+    var wrongScope = new CompactGamePlanResponse(GameActionKind.QueueVillager, .9, 1000,
+        PlanReasonCode.EconomyGrowth, PlanScopeEscalation.None, MinorPlanIntent.MaintainVillagerProduction,
+        MediumPlanIntent.GrowEconomy);
+    Equal(false, CompactGamePlanAdapter.Adapt(wrongScope, context, PlanUpdateScope.Minor, now).Success);
+    var nonRaising = wrongScope with { Medium = null, Raise = PlanScopeEscalation.Medium };
+    Equal(true, CompactGamePlanAdapter.Adapt(nonRaising, context, PlanUpdateScope.Minor, now).Success);
+    var contradiction = nonRaising with { Raise = PlanScopeEscalation.None, Minor = MinorPlanIntent.RecoverObservation };
+    Equal(false, CompactGamePlanAdapter.Adapt(contradiction, context, PlanUpdateScope.Minor, now).Success);
+    var waitForHouse = new CompactGamePlanResponse(GameActionKind.BuildHouse, .9, 1000,
+        PlanReasonCode.PopulationCap, PlanScopeEscalation.None, MinorPlanIntent.WaitForOutcome);
+    var houseContext = context with { State = State(18, 20) };
+    Equal(true, CompactGamePlanAdapter.Adapt(waitForHouse, houseContext, PlanUpdateScope.Minor, now).Success);
+}
+
+static void VlmPresetsAreValidated()
+{
+    Equal("legacy-3-1024-v1", VlmPipelinePresetCatalog.Legacy.Id);
+    Equal(640, VlmPipelinePresetCatalog.Get("event-panel-640-v1").ImageMaxTokens);
+    var failed = false;
+    try { _ = VlmPipelinePresetCatalog.Get("event-panel-custom"); }
+    catch (InvalidDataException) { failed = true; }
+    Equal(true, failed);
+}
+
+static void BattlefieldRoiMapsExactly()
+{
+    var profile = HudProfileLoader.Load(Path.Combine(RepositoryRoot(), "config", "hud", "aoe2de-zh-tw-2560x1440-50.json"));
+    Equal(new PixelRect(0, 64, 2560, 887), profile.BattlefieldRegion!.Value.ToPixels(2560, 1440));
+    Equal(new PixelRect(0, 950, 1204, 490), profile.CommandPanelRegion!.Value.ToPixels(2560, 1440));
+    Equal(new PixelRect(2062, 971, 482, 457), profile.MinimapRegion!.Value.ToPixels(2560, 1440));
+}
+
+static void BattlefieldCompositionPreservesAspectRatio()
+{
+    var root = RepositoryRoot();
+    var profile = HudProfileLoader.Load(Path.Combine(root, "config", "hud", "aoe2de-zh-tw-2560x1440-50.json"));
+    var source = BgraImageLoader.Load(Path.Combine(root, "doc", "Snipaste_2026-08-09_16-29-15.jpg"));
+    var result = VisualPromptImageEncoder.Compose(source.Pixels, source.Width, source.Height,
+        VlmPipelinePresetCatalog.Get("event-panel-edge1280-v1"), profile.BattlefieldRegion!.Value,
+        profile.CommandPanelRegion!.Value, profile.MinimapRegion!.Value, includePanel: false, []);
+    EqualSequence(["battlefield", "minimap"], result.Images.Select(image => image.Name).ToArray());
+    Equal(1280, result.Images[0].Width);
+    Equal(444, result.Images[0].Height);
+    Equal(482, result.Images[1].Width);
+    Equal(457, result.Images[1].Height);
+}
+
+static void GoldenRoiContentStaysPerceptuallyStable()
+{
+    var root = RepositoryRoot();
+    var profile = HudProfileLoader.Load(Path.Combine(root, "config", "hud", "aoe2de-zh-tw-2560x1440-50.json"));
+    var source = BgraImageLoader.Load(Path.Combine(root, "doc", "Snipaste_2026-08-09_16-29-15.jpg"));
+    var result = VisualPromptImageEncoder.Compose(source.Pixels, source.Width, source.Height,
+        VlmPipelinePresetCatalog.Get("battlefield-3-1024-v1"), profile.BattlefieldRegion!.Value,
+        profile.CommandPanelRegion!.Value, profile.MinimapRegion!.Value, includePanel: true, ["golden"]);
+    var expected = new Dictionary<string, ulong>
+    {
+        ["battlefield"] = 0x41A6BCF9C3DB0E24,
+        ["command_panel"] = 0x74ECCAA73CA4C25A,
+        ["minimap"] = 0x53B8A842FF472C3A,
+    };
+    foreach (var image in result.Images)
+    {
+        using var decoded = Cv2.ImDecode(image.Data, ImreadModes.Color);
+        var actual = PanelHashTracker.ComputePerceptualHash(decoded);
+        var distance = PanelHashTracker.HammingDistance(expected[image.Name], actual);
+        if (distance > 2) throw new InvalidOperationException($"{image.Name} golden pHash distance {distance} exceeds 2.");
+    }
+}
+
+static void PanelHashSeparatesEvidence()
+{
+    var tracker = new PanelHashTracker(10, 2, TimeSpan.FromMilliseconds(750), 2);
+    var start = DateTimeOffset.UnixEpoch;
+    tracker.ObserveHash(0, start);
+    tracker.ObserveHash(0, start.AddMilliseconds(800));
+    Equal(true, tracker.Snapshot.PanelDirty);
+    tracker.MarkAttempted(0, start.AddMilliseconds(810));
+    Equal(true, tracker.Snapshot.PanelDirty);
+    tracker.MarkAccepted(0, start.AddMilliseconds(900));
+    Equal(false, tracker.Snapshot.PanelDirty);
+
+    tracker.ObserveHash(0x3ff, start.AddMilliseconds(1000));
+    tracker.ObserveHash(0x3ff, start.AddMilliseconds(1800));
+    Equal(true, tracker.Snapshot.PanelDirty);
+    tracker.MarkAccepted(0, start.AddMilliseconds(1900));
+    Equal(true, tracker.Snapshot.PanelDirty);
+}
+
+static void RejectedPanelRequestDoesNotConsumeEvidence()
+{
+    var root = RepositoryRoot();
+    var profile = HudProfileLoader.Load(Path.Combine(root, "config", "hud", "aoe2de-zh-tw-2560x1440-50.json"));
+    var preset = VlmPipelinePresetCatalog.Get("event-panel-640-v1");
+    var now = DateTimeOffset.UnixEpoch.AddSeconds(1);
+    var composer = new VisualPromptComposer(preset, profile, () => now);
+    composer.ObservePanelHash(0, DateTimeOffset.UnixEpoch);
+    composer.ObservePanelHash(0, DateTimeOffset.UnixEpoch.AddMilliseconds(800));
+    var pixels = BlankFrame();
+    var first = composer.Compose(pixels, 2560, 1440,
+        new VisualRequestContext(PlanUpdateScope.Major, [], now), "test", null, null);
+    Equal(true, first.Observation.Images.Any(image => image.Name == "command_panel"));
+    first.Complete(false);
+    Equal<ulong?>(null, composer.PanelState.LastAcceptedPanelHash);
+
+    now = now.AddMilliseconds(100);
+    var retry = composer.Compose(pixels, 2560, 1440,
+        new VisualRequestContext(PlanUpdateScope.Minor, [], now), "test", null, null);
+    EqualSequence(["bootstrap", "dirty"], retry.Observation.Telemetry!.PanelInclusionReasons);
+    retry.Complete(true);
+    Equal<ulong?>(0, composer.PanelState.LastAcceptedPanelHash);
+}
+
+static void VisualEncodingIsLazy()
+{
+    var planner = new RecordingPlanner(Plan);
+    using var engine = new StrategyEngine(planner);
+    var now = DateTimeOffset.UnixEpoch;
+    var state = State(17, 20);
+    var history = new GameHistory();
+    history.Add(state, now);
+    var calls = 0;
+    var lease = new TrackingVisualLease();
+    _ = engine.UpdateAsync(state, history, null, now, CancellationToken.None,
+        visualFactory: _ => { calls++; return lease; }).Result;
+    Equal(1, calls);
+    _ = engine.UpdateAsync(state, history, null, now.AddMilliseconds(1), CancellationToken.None,
+        visualFactory: _ => { calls++; return new TrackingVisualLease(); }).Result;
+    Equal(1, calls);
+    Equal(true, lease.Accepted);
+}
+
+static void VisualCompositionFailureKeepsRequestPending()
+{
+    var planner = new RecordingPlanner(Plan);
+    using var engine = new StrategyEngine(planner);
+    var now = DateTimeOffset.UnixEpoch;
+    var state = State(17, 20);
+    var history = new GameHistory();
+    history.Add(state, now);
+    var failed = false;
+    try
+    {
+        _ = engine.UpdateAsync(state, history, null, now, CancellationToken.None,
+            visualFactory: _ => throw new InvalidDataException("encode failed")).Result;
+    }
+    catch (InvalidDataException) { failed = true; }
+    Equal(true, failed);
+    _ = engine.UpdateAsync(state, history, null, now.AddMilliseconds(1), CancellationToken.None,
+        visualFactory: _ => new TrackingVisualLease()).Result;
+    Equal(1, planner.Contexts.Count);
+}
+
 static void ScreenshotManifestOcrRemainsExact()
 {
     var report = VisionBenchmarkRunner.Run(Path.Combine(RepositoryRoot(), "testdata", "screenshots", "manifest.json"));
@@ -329,4 +554,11 @@ sealed class RecordingPlanner(Func<DateTimeOffset, GamePlan> planFactory) : IStr
         Contexts.Add(context);
         return Task.FromResult(new PlanningResult(planFactory(context.CapturedAt), null));
     }
+}
+
+sealed class TrackingVisualLease : IVisualRequestLease
+{
+    public VisualObservation Observation { get; } = new(2560, 1440, [], "test", null, null);
+    public bool? Accepted { get; private set; }
+    public void Complete(bool accepted) => Accepted = accepted;
 }

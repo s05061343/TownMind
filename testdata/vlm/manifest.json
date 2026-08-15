@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "profile": "../../config/hud/aoe2de-zh-tw-2560x1440-50.json",
+  "presets": ["legacy-3-1024-v1", "event-panel-640-v1"],
+  "requiredCoverageTags": [
+    "age-dark", "age-feudal", "age-castle", "age-imperial",
+    "selection-none", "selection-villager", "selection-town-center", "selection-economic-building",
+    "panel-animation", "selection-change", "minimap-open", "minimap-closed", "minimap-island",
+    "minimap-low-coverage", "lifecycle-active", "lifecycle-paused", "lifecycle-loading",
+    "ocr-unavailable", "ocr-contradictory", "request-accepted", "request-rejected",
+    "request-timeout", "request-server-failure", "request-pending-race", "ttl"
+  ],
+  "snapshots": [
+    {
+      "id": "dark-age-reference",
+      "image": "../../doc/Snipaste_2026-08-09_16-29-15.jpg",
+      "state": { "age": "Dark", "food": 200, "wood": 200, "gold": 100, "stone": 200, "population": 4, "populationCap": 5 },
+      "allowedActions": ["Observe", "Wait", "BuildHouse"],
+      "forbiddenActions": ["QueueVillager", "AdvanceAge", "GatherFood", "GatherWood", "GatherGold"],
+      "tags": ["age-dark", "selection-none", "minimap-open", "lifecycle-active"],
+      "targetAge": "Castle"
+    }
+  ],
+  "sequences": [
+    {
+      "id": "bootstrap-accepted-ttl",
+      "presetId": "event-panel-640-v1",
+      "tags": ["request-accepted", "ttl"],
+      "steps": [
+        { "atMs": 0, "kind": "frame", "frame": "../../doc/Snipaste_2026-08-09_16-29-15.jpg" },
+        { "atMs": 800, "kind": "frame", "frame": "../../doc/Snipaste_2026-08-09_16-29-15.jpg", "expectedPanelDirty": true },
+        { "atMs": 810, "kind": "request-start", "requestId": "bootstrap", "expectedPanelIncluded": true, "expectedInclusionReasons": ["bootstrap", "dirty"] },
+        { "atMs": 900, "kind": "request-complete", "requestId": "bootstrap", "outcome": "accepted", "expectedPanelDirty": false },
+        { "atMs": 16000, "kind": "request-start", "requestId": "ttl", "expectedPanelIncluded": true, "expectedInclusionReasons": ["ttl"] },
+        { "atMs": 16100, "kind": "request-complete", "requestId": "ttl", "outcome": "accepted", "expectedPanelDirty": false }
+      ]
+    },
+    {
+      "id": "pending-change-and-rejected-retry",
+      "presetId": "event-panel-640-v1",
+      "tags": ["request-pending-race", "request-rejected", "selection-change"],
+      "steps": [
+        { "atMs": 0, "kind": "frame", "frame": "../../doc/Snipaste_2026-08-09_16-29-15.jpg" },
+        { "atMs": 10, "kind": "panel-hash", "rawHash": "0000000000000000" },
+        { "atMs": 800, "kind": "panel-hash", "rawHash": "0000000000000000", "expectedPanelDirty": true },
+        { "atMs": 810, "kind": "request-start", "requestId": "pending", "expectedPanelIncluded": true, "expectedInclusionReasons": ["bootstrap", "dirty"] },
+        { "atMs": 1000, "kind": "panel-hash", "rawHash": "00000000000003FF" },
+        { "atMs": 1800, "kind": "panel-hash", "rawHash": "00000000000003FF", "expectedPanelDirty": true },
+        { "atMs": 1900, "kind": "request-complete", "requestId": "pending", "outcome": "accepted", "expectedPanelDirty": true, "expectedLastAcceptedHash": "0000000000000000" },
+        { "atMs": 2000, "kind": "request-start", "requestId": "retry", "expectedPanelIncluded": true, "expectedInclusionReasons": ["dirty"] },
+        { "atMs": 2100, "kind": "request-complete", "requestId": "retry", "outcome": "rejected", "expectedPanelDirty": true, "expectedLastAcceptedHash": "0000000000000000" },
+        { "atMs": 2200, "kind": "request-start", "requestId": "retry2", "expectedPanelIncluded": true, "expectedInclusionReasons": ["dirty"] }
+      ]
+    }
+  ]
+}

@@ -71,7 +71,25 @@ public sealed record SituationContext(
     StrategyDirective? Directive = null,
     PlanUpdateScope AllowedUpdateScope = PlanUpdateScope.Major);
 
-public sealed record VisualImage(string Name, string MimeType, byte[] Data);
+public sealed record VisualImage(
+    string Name,
+    string MimeType,
+    byte[] Data,
+    int Width = 0,
+    int Height = 0,
+    long CropMilliseconds = 0,
+    long ResizeMilliseconds = 0,
+    long JpegEncodeMilliseconds = 0,
+    string? InclusionReason = null);
+
+public sealed record VisualCompositionTelemetry(
+    string PresetId,
+    int PresetRevision,
+    long PanelHashMilliseconds,
+    long CropMilliseconds,
+    long ResizeMilliseconds,
+    long JpegEncodeMilliseconds,
+    IReadOnlyList<string> PanelInclusionReasons);
 
 public sealed record VisualObservation(
     int FrameWidth,
@@ -79,7 +97,19 @@ public sealed record VisualObservation(
     IReadOnlyList<VisualImage> Images,
     string UiLayout,
     string? PreviousAction,
-    string? PreviousResult);
+    string? PreviousResult,
+    VisualCompositionTelemetry? Telemetry = null);
+
+public sealed record VisualRequestContext(
+    PlanUpdateScope Scope,
+    IReadOnlyList<PlanningEvent> Events,
+    DateTimeOffset At);
+
+public interface IVisualRequestLease
+{
+    VisualObservation Observation { get; }
+    void Complete(bool accepted);
+}
 
 public enum VisualToolKind { Observe, Wait, LeftClick, RightClick, Drag }
 

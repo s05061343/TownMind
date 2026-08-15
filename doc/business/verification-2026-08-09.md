@@ -61,6 +61,17 @@ artifacts/packages/AgePilot-public-alpha-win-x64.zip
 SHA-256 236A3C8FBE73812D650AEC2B690048A5953E6CB1828400FCB915969B3DBEF598
 ```
 
+## 2026-08-15 VLM pipeline 驗證基礎建設
+
+- 正式預設仍為 `legacy-3-1024-v1`，但已改成 planning request 才 JPEG encode。
+- `bootstrap-accepted-ttl` sequence replay 通過。
+- `pending-change-and-rejected-retry` sequence replay 通過；舊 request accepted 後新 panel 仍 dirty，rejected request 不刷新 accepted evidence。
+- ROI Geometry Gate 與 battlefield／command panel／minimap perceptual golden 已加入自動回歸。
+- 初始 snapshot corpus 仍缺四時代、完整 selection、minimap 與 failure coverage；不得據此 promotion 或宣稱延遲改善。
+- 已用單一 snapshot 做 runner smoke：legacy 3-image median／P95 約 9.98／10.21 秒、median prompt 3366 tokens；event-panel-640 約 10.25／11.34 秒、median prompt 2379 tokens，其中兩圖 request 約 10.06／10.25 秒、三圖 TTL request 11.34 秒。樣本與 coverage 均不足，且 median／P95 Gate 未通過，因此不得 promotion；這不是完整效能結論。
+- 2026-08-16 拆解同一 image-pipeline smoke：Major completion 527～572 tokens，`predicted_ms` 約 9.5～10.2 秒，prompt 多為 0.3～0.5 秒；decode 是本批 10 秒級 E2E 主瓶頸。已加入 `compact-v2` 候選、scope-specific 64／96／96 target 與 `gameplan-contract-report`；本段數據本身不是 contract paired A/B，正式預設仍為 `legacy-v1`。
+- 2026-08-16 固定 `legacy-3-1024-v1`、同一黑暗時代 snapshot 的 contract smoke（各 scope 三次）中，`legacy-v1 → compact-v2` median 分別為：Major completion `535 → 78`、decode `6644 → 1238 ms`、E2E `7051 → 1609 ms`；Medium `429 → 68`、`5471 → 1083 ms`、`5876 → 1474 ms`；Minor `317 → 58`、`4057 → 921 ms`、`4493 → 1328 ms`。三種 scope 都是 3/3 success、3/3 quality，action parity、target、ceiling 與 hard cap 通過；但仍缺 16 個 coverage tags，因此 Promotion Gate 正確拒絕，正式預設不得變更。報告位於 `artifacts/reports/gameplan-contract-smoke.json`。
+
 ## 尚缺的外部證據
 
 - 封建、城堡與帝王時代的 ground truth。

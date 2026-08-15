@@ -22,6 +22,10 @@
 - [x] `GameNotFound / Detected / Loading / Active / Paused / Unavailable / Ended` 狀態與暫停 fail-closed。
 - [x] 變更 ROI 快取、零拷貝 Frame bridge 與可重跑 Vision／Replay JSON 報告。
 - [x] OCR 失敗不快取、下一掃描週期重試，以及人口目前值／上限成對確認。
+- [x] VLM request lazy image encoding、版本化 preset、battlefield ROI 與 event-panel deterministic sequence replay。
+- [ ] VLM snapshot corpus 覆蓋矩陣與 640／512、1536／1280／1024 paired A/B Promotion Gate。
+- [x] Compact GamePlan v2 versioned wire contract、deterministic adapter 與 scope-specific token Gate 基礎建設。
+- [ ] 固定 `legacy-3-1024-v1` 的 GamePlan contract v1／v2 paired A/B 與 promotion。
 - [x] 人口專用多路前處理，以及 `/` 誤辨為 `1/I/l/|` 或遺失時的唯一候選修復。
 - [ ] 多樣本 Vision Gate 準確率驗收。
 - [ ] 小地圖地形／拓撲 MapContext 多樣本 Gate；未通過前不得驅動自動操作。
@@ -102,6 +106,8 @@ Phase 0 只回答一個問題：AgePilot 能否從 AOE2 DE 畫面可靠取得 Ti
 - 五局完整實機無 Crash、錯誤提示與 FPS 影響紀錄。
 
 以上項目未完成前，不宣稱 OCR 或任意解析度正式支援。
+
+VLM 候選 pipeline 亦不得因程式已存在就宣稱效能改善。正式預設仍是 `legacy-3-1024-v1`；只有 snapshot corpus coverage 完整、sequence replay 全通過，且 median／P95、token、品質與安全 Gate 同時成立後才能 promotion。Battlefield crop 仍只代表既有 2560×1440 校準環境的 VLM 輸入，不代表新增遊戲解析度支援。
 
 ## 8. 下一批樣本需求
 

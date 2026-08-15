@@ -9,6 +9,7 @@
   "pauseMenuRegion": { "x": 0.47265625, "y": 0.31527778, "width": 0.05859375, "height": 0.02777778 },
   "minimapRegion": { "x": 0.80546875, "y": 0.67430556, "width": 0.18828125, "height": 0.31666667 },
   "commandPanelRegion": { "x": 0.00000000, "y": 0.66000000, "width": 0.47000000, "height": 0.34000000 },
+  "battlefieldRegion": { "x": 0.00000000, "y": 0.04500000, "width": 1.00000000, "height": 0.61500000 },
   "commandGridRegion": { "x": 0.00400000, "y": 0.85500000, "width": 0.13200000, "height": 0.13200000 },
   "commandGridRows": 3,
   "commandGridColumns": 5,

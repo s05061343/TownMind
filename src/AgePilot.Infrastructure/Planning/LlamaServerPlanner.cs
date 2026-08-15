@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgePilot.Core.Automation;
@@ -10,6 +11,39 @@ using AgePilot.Core.Planning;
 using AgePilot.Infrastructure.Diagnostics;
 
 namespace AgePilot.Infrastructure.Planning;
+
+public sealed record PlannerRequestTelemetry(
+    string RequestId,
+    string PresetId,
+    int PresetRevision,
+    string ContractId,
+    int ContractRevision,
+    PlanUpdateScope Scope,
+    int MaxCompletionTokens,
+    string? Backend,
+    string? Device,
+    string MmprojOffloadStatus,
+    string? MainModelLayerEvidence,
+    int? PromptTokens,
+    int? CompletionTokens,
+    int? TotalTokens,
+    string PerImageTokenMeasurementMethod,
+    IReadOnlyDictionary<string, int>? ImagePromptTokens,
+    double? PromptMilliseconds,
+    double? PredictedMilliseconds,
+    long PanelHashMilliseconds,
+    long CropMilliseconds,
+    long ResizeMilliseconds,
+    long JpegEncodeMilliseconds,
+    long RequestSerializeMilliseconds,
+    long HttpRoundtripMilliseconds,
+    long EndToEndMilliseconds,
+    bool Accepted,
+    IReadOnlyList<VisualImageTelemetry> Images);
+
+public sealed record VisualImageTelemetry(
+    string Name, int Width, int Height, int JpegBytes, string? InclusionReason,
+    long CropMilliseconds, long ResizeMilliseconds, long JpegEncodeMilliseconds);
 
 public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatusSource, IDisposable
 {
@@ -25,6 +59,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
     private Process? _process;
     private string? _backend;
     private string? _device;
+    private OffloadEvidence _lastOffloadEvidence = new("RequestedUnverified", null);
     private bool _startupAttempted;
     private bool _restartRequired;
     private readonly Queue<string> _serverMessages = new();
@@ -32,6 +67,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     public PlannerRuntimeStatus RuntimeStatus => _runtimeStatus;
     public string? LastRawResponse { get; private set; }
+    public PlannerRequestTelemetry? LastTelemetry { get; private set; }
 
     public LlamaServerPlanner(AppSettings settings, LocalJsonLineLogger? logger = null)
     {
@@ -42,6 +78,15 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
     public async Task<PlanningResult> PlanAsync(SituationContext context, CancellationToken cancellationToken)
     {
+        var requestId = Guid.NewGuid().ToString("N");
+        var serializeMilliseconds = 0L;
+        var httpMilliseconds = 0L;
+        Stopwatch? httpClock = null;
+        CompletionEnvelope? receivedEnvelope = null;
+        var requestStarted = Stopwatch.StartNew();
+        var contract = GamePlanContractCatalog.Get(_settings.GamePlanContractId);
+        var effectiveScope = context.PreviousPlan is null ? PlanUpdateScope.Major : context.AllowedUpdateScope;
+        var maxCompletionTokens = contract.CompletionBudgets[effectiveScope].HardCap;
         if (!_settings.EnableLocalPlanning)
         {
             SetStatus(PlannerRuntimePhase.NotConfigured, "本機規劃已停用");
@@ -54,8 +99,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             SetStatus(PlannerRuntimePhase.Planning, $"LLM 正在產生戰局計畫（{FormatBackend()}）", FormatBackend());
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(_settings.LlmPlanningTimeoutSeconds));
-            var started = Stopwatch.StartNew();
-            var effectiveScope = context.PreviousPlan is null ? PlanUpdateScope.Major : context.AllowedUpdateScope;
+            var serializeClock = Stopwatch.StartNew();
             var userContent = new List<object>();
             if (context.Visual is { } visual)
             {
@@ -65,51 +109,70 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                     image_url = new { url = $"data:{image.MimeType};base64,{Convert.ToBase64String(image.Data)}" },
                 }));
             }
-            userContent.Add(new { type = "text", text = JsonSerializer.Serialize(ToPromptContext(context, effectiveScope), JsonOptions) });
+            userContent.Add(new { type = "text", text = JsonSerializer.Serialize(ToPromptContext(context, effectiveScope, contract.IsCompact), JsonOptions) });
             var request = new
             {
                 model = "agepilot-local",
                 temperature = 0.2,
-                max_tokens = 1024,
+                seed = _settings.LlmSeed,
+                max_tokens = maxCompletionTokens,
                 messages = new object[]
                 {
-                    new { role = "system", content = SystemPrompt },
+                    new { role = "system", content = contract.IsCompact ? CompactSystemPrompt : SystemPrompt },
                     new { role = "user", content = userContent.ToArray() },
                 },
-                response_format = BuildResponseFormat(effectiveScope, AllowedActions(context.State)),
+                response_format = contract.IsCompact
+                    ? BuildCompactResponseFormat(effectiveScope, AllowedActions(context.State))
+                    : BuildResponseFormat(effectiveScope, AllowedActions(context.State)),
             };
-            using var response = await _http.PostAsJsonAsync("v1/chat/completions", request, JsonOptions, timeout.Token);
+            var requestBytes = JsonSerializer.SerializeToUtf8Bytes(request, JsonOptions);
+            serializeClock.Stop();
+            serializeMilliseconds = serializeClock.ElapsedMilliseconds;
+            using var contentBody = new ByteArrayContent(requestBytes);
+            contentBody.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            httpClock = Stopwatch.StartNew();
+            using var response = await _http.PostAsync("v1/chat/completions", contentBody, timeout.Token);
             response.EnsureSuccessStatusCode();
-            var envelope = await response.Content.ReadFromJsonAsync<CompletionEnvelope>(JsonOptions, timeout.Token)
+            receivedEnvelope = await response.Content.ReadFromJsonAsync<CompletionEnvelope>(JsonOptions, timeout.Token)
                 ?? throw new InvalidDataException("模型回覆為空");
-            var content = envelope.Choices.FirstOrDefault()?.Message.Content;
+            httpClock.Stop();
+            httpMilliseconds = httpClock.ElapsedMilliseconds;
+            var content = receivedEnvelope.Choices.FirstOrDefault()?.Message.Content;
             LastRawResponse = content;
-            var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
-                ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
             var now = DateTimeOffset.UtcNow;
-            if (dto.Action is null) throw new InvalidDataException("模型未回傳動作");
-            if (dto.MinorDecision is null) throw new InvalidDataException("模型未回傳 Minor 判斷");
-            var gameAction = new GameAction(dto.Action.Kind, dto.Action.Reason ?? "", Math.Max(1, dto.Action.Quantity));
-            var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, gameAction,
-                dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence);
-            var (major, medium, minor) = AssembleDecisions(
-                dto.MajorDecision is { } majorDto ? ToDecision(majorDto, DecisionLevel.Major) : null,
-                dto.MediumDecision is { } mediumDto ? ToDecision(mediumDto, DecisionLevel.Medium) : null,
-                ToDecision(dto.MinorDecision, DecisionLevel.Minor),
-                context.PreviousPlan, effectiveScope);
-            var plan = new GamePlan(Guid.NewGuid().ToString("N"), now, now.AddSeconds(60),
-                context.Directive?.Strategy ?? "穩定發展經濟並升時代", minor.Objective, dto.Reason, dto.Confidence,
-                VisualDecision: decision, MajorDecision: major, MediumDecision: medium, MinorDecision: minor,
-                RequestedUpdateScope: dto.RequestedUpdateScope);
-            var validated = GamePlanValidator.Validate(plan, now);
-            _logger?.Write("planning.completed", new { backend = _backend, latencyMs = started.ElapsedMilliseconds, validated = validated.Success, validated.Error });
+            var validated = contract.IsCompact
+                ? ParseCompactPlan(content, context, effectiveScope, now)
+                : ParseLegacyPlan(content, context, effectiveScope, now);
+            requestStarted.Stop();
+            LastTelemetry = CreateTelemetry(requestId, context.Visual, receivedEnvelope, contract, effectiveScope,
+                maxCompletionTokens, serializeMilliseconds, httpMilliseconds, requestStarted.ElapsedMilliseconds, validated.Success);
+            _logger?.Write("planning.completed", new
+            {
+                requestId,
+                backend = _backend,
+                latencyMs = requestStarted.ElapsedMilliseconds,
+                scope = effectiveScope.ToString(),
+                contractId = contract.Id,
+                maxTokens = maxCompletionTokens,
+                telemetry = LastTelemetry,
+                validated = validated.Success,
+                validated.Error,
+            });
             SetStatus(validated.Success ? PlannerRuntimePhase.Ready : PlannerRuntimePhase.Error,
                 validated.Success ? $"LLM 已就緒（{FormatBackend()}）" : $"計畫格式驗證失敗：{validated.Error}", FormatBackend());
             return validated;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            _logger?.Write("planning.failure", new { backend = _backend, type = ex.GetType().Name, ex.Message });
+            if (httpClock is { IsRunning: true })
+            {
+                httpClock.Stop();
+                httpMilliseconds = httpClock.ElapsedMilliseconds;
+            }
+            requestStarted.Stop();
+            LastTelemetry = CreateTelemetry(requestId, context.Visual, receivedEnvelope, contract, effectiveScope,
+                maxCompletionTokens, serializeMilliseconds, httpMilliseconds, requestStarted.ElapsedMilliseconds, accepted: false);
+            _logger?.Write("planning.failure", new { requestId, backend = _backend, type = ex.GetType().Name, ex.Message, telemetry = LastTelemetry });
             var tail = GetServerMessageTail();
             var message = string.IsNullOrWhiteSpace(tail) ? ex.Message : $"{ex.Message}；llama-server: {tail}";
             SetStatus(PlannerRuntimePhase.Error, message, FormatBackend());
@@ -146,6 +209,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         var model = Resolve(_settings.LlmModelPath);
         var mmproj = Resolve(_settings.VisionProjectorPath);
         var runtime = Resolve(_settings.LlamaRuntimePath);
+        var pipelinePreset = VlmPipelinePresetCatalog.Get(_settings.VlmPipelinePresetId);
         if (!File.Exists(model))
         {
             SetStatus(PlannerRuntimePhase.NotConfigured, $"找不到模型：{model}");
@@ -172,7 +236,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                 {
                     FileName = executable,
                     WorkingDirectory = Path.GetDirectoryName(executable)!,
-                    Arguments = $"-m \"{model}\" --mmproj \"{mmproj}\" --mmproj-offload --image-min-tokens 256 --image-max-tokens 1024 --host 127.0.0.1 --port {_settings.LlmPort} -c {_settings.LlmContextSize} --n-gpu-layers {_settings.LlmGpuLayers} --cache-ram 0 --alias agepilot-local --jinja -np 1 --device {device}",
+                    Arguments = $"-m \"{model}\" --mmproj \"{mmproj}\" --mmproj-offload --image-min-tokens {pipelinePreset.ImageMinTokens} --image-max-tokens {pipelinePreset.ImageMaxTokens} --host 127.0.0.1 --port {_settings.LlmPort} -c {_settings.LlmContextSize} --n-gpu-layers {_settings.LlmGpuLayers} --cache-ram 0 --alias agepilot-local --jinja --perf -np 1 --device {device}",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -193,8 +257,21 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
                 {
                     if (await IsHealthyAsync(cancellationToken))
                     {
+                        var offloadEvidence = GetOffloadEvidence();
+                        if (offloadEvidence.Mmproj == "Contradictory")
+                            throw new InvalidOperationException("llama-server 回報 mmproj 使用 CPU；拒絕未預期的 projector fallback");
                         SetStatus(PlannerRuntimePhase.Ready, $"LLM 已就緒（{FormatBackend()}）", FormatBackend());
-                        _logger?.Write("llm.server.ready", new { backend = _backend, device = _device, processId = _process.Id });
+                        _lastOffloadEvidence = offloadEvidence;
+                        _logger?.Write("llm.server.ready", new
+                        {
+                            backend = _backend,
+                            device = _device,
+                            processId = _process.Id,
+                            presetId = pipelinePreset.Id,
+                            imageMinTokens = pipelinePreset.ImageMinTokens,
+                            imageMaxTokens = pipelinePreset.ImageMaxTokens,
+                            offload = offloadEvidence,
+                        });
                         return;
                     }
                     await Task.Delay(500, cancellationToken);
@@ -290,9 +367,11 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             _settings = settings;
             _backend = null;
             _device = null;
+            _lastOffloadEvidence = new("RequestedUnverified", null);
             _startupAttempted = false;
             _restartRequired = false;
             LastRawResponse = null;
+            LastTelemetry = null;
             lock (_serverMessages) _serverMessages.Clear();
             SetStatus(PlannerRuntimePhase.Starting, "正在重新啟動 llama-server");
             try { await EnsureStartedAsync(cancellationToken); }
@@ -311,7 +390,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         catch (HttpRequestException) { return false; }
     }
 
-    private static object ToPromptContext(SituationContext context, PlanUpdateScope scope) => new
+    private static object ToPromptContext(SituationContext context, PlanUpdateScope scope, bool compact) => new
     {
         capturedAt = context.CapturedAt,
         directive = context.Directive is null ? null : new
@@ -320,7 +399,7 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
             targetAge = context.Directive.TargetAge.ToString(),
         },
         allowedUpdateScope = scope.ToString(),
-        outputFields = OutputFields(scope),
+        outputFields = OutputFields(scope, compact),
         frozenDecisions = new
         {
             major = scope < PlanUpdateScope.Major ? context.PreviousPlan?.MajorDecision : null,
@@ -360,12 +439,72 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         ? new { value.Value, value.Confidence, value.ObservedAt }
         : null;
 
-    private static string[] OutputFields(PlanUpdateScope scope)
+    private PlannerRequestTelemetry CreateTelemetry(
+        string requestId,
+        VisualObservation? visual,
+        CompletionEnvelope? envelope,
+        GamePlanContract contract,
+        PlanUpdateScope scope,
+        int maxCompletionTokens,
+        long serializeMilliseconds,
+        long httpMilliseconds,
+        long endToEndMilliseconds,
+        bool accepted)
     {
-        var fields = new List<string> { "minorDecision" };
-        if (scope >= PlanUpdateScope.Medium) fields.Add("mediumDecision");
-        if (scope >= PlanUpdateScope.Major) fields.Add("majorDecision");
+        var preset = VlmPipelinePresetCatalog.Get(_settings.VlmPipelinePresetId);
+        var composition = visual?.Telemetry;
+        var images = visual?.Images.Select(image => new VisualImageTelemetry(
+            image.Name, image.Width, image.Height, image.Data.Length, image.InclusionReason,
+            image.CropMilliseconds, image.ResizeMilliseconds, image.JpegEncodeMilliseconds)).ToArray()
+            ?? [];
+        return new PlannerRequestTelemetry(requestId, composition?.PresetId ?? preset.Id,
+            composition?.PresetRevision ?? preset.Revision, contract.Id, contract.Revision, scope, maxCompletionTokens,
+            _backend, _device, _lastOffloadEvidence.Mmproj, _lastOffloadEvidence.MainModelLayerEvidence,
+            envelope?.Usage?.PromptTokens, envelope?.Usage?.CompletionTokens, envelope?.Usage?.TotalTokens,
+            "Unavailable", null,
+            envelope?.Timings?.PromptMilliseconds, envelope?.Timings?.PredictedMilliseconds,
+            composition?.PanelHashMilliseconds ?? 0, composition?.CropMilliseconds ?? 0,
+            composition?.ResizeMilliseconds ?? 0, composition?.JpegEncodeMilliseconds ?? 0,
+            serializeMilliseconds, httpMilliseconds, endToEndMilliseconds, accepted, images);
+    }
+
+    private static string[] OutputFields(PlanUpdateScope scope, bool compact = false)
+    {
+        var fields = new List<string> { compact ? "minor" : "minorDecision" };
+        if (scope >= PlanUpdateScope.Medium) fields.Add(compact ? "medium" : "mediumDecision");
+        if (scope >= PlanUpdateScope.Major) fields.Add(compact ? "major" : "majorDecision");
         return fields.ToArray();
+    }
+
+    private static PlanningResult ParseCompactPlan(string? content, SituationContext context,
+        PlanUpdateScope scope, DateTimeOffset now)
+    {
+        var response = JsonSerializer.Deserialize<CompactGamePlanResponse>(content ?? "", JsonOptions)
+            ?? throw new InvalidDataException("模型未回傳有效 Compact GamePlan JSON");
+        if (!AllowedActions(context.State).Contains(response.Action))
+            return new(null, $"Compact GamePlan 動作不在本輪 allowlist：{response.Action}");
+        return CompactGamePlanAdapter.Adapt(response, context, scope, now);
+    }
+
+    private static PlanningResult ParseLegacyPlan(string? content, SituationContext context,
+        PlanUpdateScope scope, DateTimeOffset now)
+    {
+        var dto = JsonSerializer.Deserialize<PlanDto>(content ?? "", JsonOptions)
+            ?? throw new InvalidDataException("模型未回傳有效 JSON 計畫");
+        if (dto.Action is null) throw new InvalidDataException("模型未回傳動作");
+        if (dto.MinorDecision is null) throw new InvalidDataException("模型未回傳 Minor 判斷");
+        var gameAction = new GameAction(dto.Action.Kind, dto.Action.Reason ?? "", Math.Max(1, dto.Action.Quantity));
+        var decision = new VisualPlayerDecision(dto.Assessment, dto.Goal, dto.Reason, gameAction,
+            dto.ExpectedResult, dto.RecheckAfterMs, dto.Confidence);
+        var (major, medium, minor) = AssembleDecisions(
+            dto.MajorDecision is { } majorDto ? ToDecision(majorDto, DecisionLevel.Major) : null,
+            dto.MediumDecision is { } mediumDto ? ToDecision(mediumDto, DecisionLevel.Medium) : null,
+            ToDecision(dto.MinorDecision, DecisionLevel.Minor), context.PreviousPlan, scope);
+        var plan = new GamePlan(Guid.NewGuid().ToString("N"), now, now.AddSeconds(60),
+            context.Directive?.Strategy ?? "穩定發展經濟並升時代", minor.Objective, dto.Reason, dto.Confidence,
+            VisualDecision: decision, MajorDecision: major, MediumDecision: medium, MinorDecision: minor,
+            RequestedUpdateScope: dto.RequestedUpdateScope);
+        return GamePlanValidator.Validate(plan, now);
     }
 
     private static DecisionNode ToDecision(DecisionDto dto, DecisionLevel level) => new(
@@ -416,8 +555,38 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
         lock (_serverMessages)
         {
             _serverMessages.Enqueue(message);
-            while (_serverMessages.Count > 20) _serverMessages.Dequeue();
+            while (_serverMessages.Count > 200) _serverMessages.Dequeue();
         }
+    }
+
+    private OffloadEvidence GetOffloadEvidence()
+    {
+        string[] messages;
+        lock (_serverMessages) messages = _serverMessages.ToArray();
+        var projectorLines = messages.Where(line =>
+            line.Contains("mmproj", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("projector", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("vision", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var contradictory = projectorLines.Any(line =>
+            line.Contains("CPU", StringComparison.OrdinalIgnoreCase) &&
+            !line.Contains("GPU", StringComparison.OrdinalIgnoreCase));
+        var confirmed = projectorLines.Any(line =>
+            line.Contains("ROCm", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("Vulkan", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("GPU", StringComparison.OrdinalIgnoreCase));
+        var layerLine = messages.LastOrDefault(line =>
+            line.Contains("offload", StringComparison.OrdinalIgnoreCase) &&
+            line.Contains("layer", StringComparison.OrdinalIgnoreCase));
+        return new OffloadEvidence(
+            contradictory ? "Contradictory" : confirmed ? "Confirmed" : "RequestedUnverified",
+            SanitizeServerEvidence(layerLine));
+    }
+
+    private static string? SanitizeServerEvidence(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return null;
+        var modelIndex = line.IndexOf(".gguf", StringComparison.OrdinalIgnoreCase);
+        return modelIndex < 0 ? line.Trim() : "GGUF path omitted; " + line[(modelIndex + 5)..].Trim();
     }
 
     private string GetServerMessageTail()
@@ -451,7 +620,18 @@ public sealed class LlamaServerPlanner : IStrategicPlanner, IPlannerRuntimeStatu
 
 expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值驗證的直接後果，例如「食物減少 50」「時代欄位改變」。不可以寫「升上城堡時代」「人口增加 10」這種需要數十秒到數分鐘、跨多個動作才會發生的策略結果——系統是用 HUD 數值變化來確認動作是否被遊戲接受的。
 
-前一動作的結果由系統依 OCR 自行判定，不會問你，你也不需要回報。panorama 是完整遊戲畫面，command_panel 是左下指令面板，minimap 是右下小地圖，用它們理解局勢即可。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。你只能選 context.allowedActions 與 JSON schema 同時允許的動作。所有文字欄位都要精簡，assessment 不超過 300 字。不要輸出 Markdown，嚴格依 JSON schema 回覆。
+前一動作的結果由系統依 OCR 自行判定，不會問你，你也不需要回報。visual.imageOrder 是本輪實際附帶的影像：battlefield 是純世界視野，minimap 是右下小地圖，command_panel 是條件式左下指令面板；legacy preset 可能改以 panorama 表示完整遊戲畫面。沒有列出的影像代表本輪未提供，不得假裝看見。只管理村民、採集、經濟建築、經濟科技與升時代；禁止軍事與戰鬥。若不確定或畫面矛盾，選 Observe 或 Wait。你只能選 context.allowedActions 與 JSON schema 同時允許的動作。所有文字欄位都要精簡，assessment 不超過 300 字。不要輸出 Markdown，嚴格依 JSON schema 回覆。
+""";
+
+    private const string CompactSystemPrompt = """
+/no_think
+你是謹慎的 AOE2 DE 經濟發展玩家。玩家 directive 與目標時代不可改寫。維護 Major、Medium、Minor 三層決策語意，但只輸出 JSON schema 指定的 enum，不輸出自然語言、座標、證據或結果描述。
+
+context.outputFields 是本輪可更新的層級；未列出的父層會由系統沿用。若 frozen parent 已失效，raise 設為需要重建的更高層；否則 raise=None。Major 表示長期發展階段，Medium 表示達成方法，Minor 表示當下小目標。
+
+每輪只從 context.allowedActions 選一個 action。人口剩餘空間不超過 2 且木材足夠時選 BuildHouse；否則食物足夠且人口安全時選 QueueVillager。關鍵 OCR 不可用或矛盾時只能 Observe 或 Wait。未開放、資源不足或不在 allowlist 的動作不得選擇。
+
+reason、minor、medium、major 必須選最貼近 context 的 schema enum。recheckMs 介於 250 與 30000；對 Observe/Wait 表示重新觀察等待時間，其他動作仍填安全的短期重查時間。不要輸出 Markdown 或 schema 以外欄位。
 """;
 
     private static object DecisionNodeSchema() => new Dictionary<string, object>
@@ -537,6 +717,56 @@ expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值
         };
     }
 
+    public static object BuildCompactResponseFormat(PlanUpdateScope scope) =>
+        BuildCompactResponseFormat(scope, Enum.GetValues<GameActionKind>());
+
+    public static object BuildCompactResponseFormat(PlanUpdateScope scope, IReadOnlyList<GameActionKind> allowedActions)
+    {
+        var required = new List<string> { "action", "confidence", "recheckMs", "reason", "raise", "minor" };
+        var properties = new Dictionary<string, object>
+        {
+            ["action"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = allowedActions.Select(item => item.ToString()).ToArray() },
+            ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
+            ["recheckMs"] = new { type = "integer", minimum = 250, maximum = 30000 },
+            ["reason"] = EnumSchema<PlanReasonCode>(),
+            ["raise"] = new Dictionary<string, object>
+            {
+                ["type"] = "string",
+                ["enum"] = scope switch
+                {
+                    PlanUpdateScope.Minor => new[] { "None", "Medium", "Major" },
+                    PlanUpdateScope.Medium => new[] { "None", "Major" },
+                    _ => new[] { "None" },
+                },
+            },
+            ["minor"] = EnumSchema<MinorPlanIntent>(),
+        };
+        if (scope >= PlanUpdateScope.Medium) { required.Add("medium"); properties["medium"] = EnumSchema<MediumPlanIntent>(); }
+        if (scope >= PlanUpdateScope.Major) { required.Add("major"); properties["major"] = EnumSchema<MajorPlanIntent>(); }
+        return new
+        {
+            type = "json_schema",
+            json_schema = new
+            {
+                name = "agepilot_compact_game_plan_v2",
+                strict = true,
+                schema = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = required.ToArray(),
+                    ["properties"] = properties,
+                },
+            },
+        };
+    }
+
+    private static Dictionary<string, object> EnumSchema<T>() where T : struct, Enum => new()
+    {
+        ["type"] = "string",
+        ["enum"] = Enum.GetNames<T>(),
+    };
+
     public static IReadOnlyList<GameActionKind> AllowedActions(GameState state)
     {
         var allowed = new List<GameActionKind> { GameActionKind.Observe, GameActionKind.Wait };
@@ -555,9 +785,20 @@ expectedResult 必須且只能描述這個動作在數秒內就能從 HUD 數值
         return allowed;
     }
 
-    private sealed record CompletionEnvelope(IReadOnlyList<CompletionChoice> Choices);
+    private sealed record CompletionEnvelope(
+        IReadOnlyList<CompletionChoice> Choices,
+        CompletionUsage? Usage = null,
+        CompletionTimings? Timings = null);
     private sealed record CompletionChoice(CompletionMessage Message);
     private sealed record CompletionMessage(string Content);
+    private sealed record OffloadEvidence(string Mmproj, string? MainModelLayerEvidence);
+    private sealed record CompletionUsage(
+        [property: JsonPropertyName("prompt_tokens")] int? PromptTokens,
+        [property: JsonPropertyName("completion_tokens")] int? CompletionTokens,
+        [property: JsonPropertyName("total_tokens")] int? TotalTokens);
+    private sealed record CompletionTimings(
+        [property: JsonPropertyName("prompt_ms")] double? PromptMilliseconds,
+        [property: JsonPropertyName("predicted_ms")] double? PredictedMilliseconds);
     private sealed record PlanDto(string Assessment, string Goal, string Reason, double Confidence, PlanUpdateScope RequestedUpdateScope,
         DecisionDto? MajorDecision, DecisionDto? MediumDecision, DecisionDto? MinorDecision,
         GameActionDto? Action, string ExpectedResult, int RecheckAfterMs);

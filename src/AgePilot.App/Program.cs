@@ -17,6 +17,7 @@ using AgePilot.Core.Planning;
 using AgePilot.Core.Automation;
 using AgePilot.Infrastructure.Planning;
 using System.Text.Json;
+using OpenCvSharp;
 
 var isGui = args.Length == 0 || args is ["overlay", _];
 Mutex? guiMutex = null;
@@ -43,6 +44,7 @@ return args switch
 {
     [] => RunDashboard(),
     ["inspect", var imagePath, var profilePath] => Inspect(imagePath, profilePath),
+    ["roi-hashes", var imagePath, var profilePath] => RoiHashes(imagePath, profilePath),
     ["find-game"] => FindGame(),
     ["capture", var outputPath] => await CaptureAsync(outputPath),
     ["ocr-image", var imagePath, var profilePath] => OcrImage(imagePath, profilePath),
@@ -52,7 +54,11 @@ return args switch
     ["replay-report", var manifestPath, var outputPath, var cycles] => ReplayReport(manifestPath, outputPath, cycles),
     ["live-benchmark", var profilePath, var outputPath, var seconds] => await LiveBenchmarkAsync(profilePath, outputPath, seconds),
     ["plan-smoke"] => await PlanSmokeAsync(),
+    ["plan-smoke", var contractId] => await PlanSmokeAsync(contractId),
     ["vlm-image", var imagePath] => await VlmImageAsync(imagePath),
+    ["vlm-ab-report", var manifestPath, var outputPath] => await VlmAbReportAsync(manifestPath, outputPath),
+    ["gameplan-contract-report", var manifestPath, var outputPath] => await GamePlanContractReportAsync(manifestPath, outputPath),
+    ["vlm-sequence-report", var manifestPath, var outputPath] => VlmSequenceReport(manifestPath, outputPath),
     _ => ShowUsage(),
 };
 }
@@ -77,6 +83,21 @@ static int Inspect(string imagePath, string profilePath)
         Console.WriteLine($"{field,-12} x={pixels.X,4} y={pixels.Y,3} w={pixels.Width,3} h={pixels.Height,3}");
     }
 
+    return 0;
+}
+
+static int RoiHashes(string imagePath, string profilePath)
+{
+    var source = BgraImageLoader.Load(ResolveInputPath(imagePath));
+    var profile = HudProfileLoader.Load(ResolveInputPath(profilePath));
+    var result = VisualPromptImageEncoder.Compose(source.Pixels, source.Width, source.Height,
+        VlmPipelinePresetCatalog.Get("battlefield-3-1024-v1"), profile.BattlefieldRegion!.Value,
+        profile.CommandPanelRegion!.Value, profile.MinimapRegion!.Value, includePanel: true, ["golden"]);
+    foreach (var image in result.Images)
+    {
+        using var decoded = Cv2.ImDecode(image.Data, ImreadModes.Color);
+        Console.WriteLine($"{image.Name} {image.Width}x{image.Height} pHash={PanelHashTracker.ComputePerceptualHash(decoded):X16}");
+    }
     return 0;
 }
 
@@ -291,6 +312,7 @@ static int ShowUsage()
 {
     Console.WriteLine("AgePilot Vision Spike");
     Console.WriteLine("  inspect <jpeg-path> <hud-profile-path>");
+    Console.WriteLine("  roi-hashes <jpeg-path> <hud-profile-path>");
     Console.WriteLine("  find-game");
     Console.WriteLine("  capture <output-bmp-path>");
     Console.WriteLine("  ocr-image <jpeg-path> <hud-profile-path>");
@@ -300,8 +322,48 @@ static int ShowUsage()
     Console.WriteLine("  replay-report <manifest-path> <output-json-path> <cycles>");
     Console.WriteLine("  live-benchmark <hud-profile-path> <output-json-path> <seconds>");
     Console.WriteLine("  plan-smoke");
+    Console.WriteLine("  plan-smoke <contract-id>");
     Console.WriteLine("  vlm-image <jpeg-path>");
+    Console.WriteLine("  vlm-ab-report <manifest-path> <output-json-path>");
+    Console.WriteLine("  gameplan-contract-report <manifest-path> <output-json-path>");
+    Console.WriteLine("  vlm-sequence-report <manifest-path> <output-json-path>");
     return 1;
+}
+
+static int VlmSequenceReport(string manifestPath, string outputPath)
+{
+    var report = VlmPipelineBenchmark.RunSequenceOnly(ResolveInputPath(manifestPath));
+    VlmPipelineBenchmark.WriteSequenceReport(report, outputPath);
+    foreach (var item in report)
+        Console.WriteLine($"{(item.Passed ? "PASS" : "FAIL")} {item.CaseId}{(item.Passed ? "" : $": {string.Join("; ", item.Failures)}")}");
+    return report.All(item => item.Passed) ? 0 : 11;
+}
+
+static async Task<int> VlmAbReportAsync(string manifestPath, string outputPath)
+{
+    var report = await VlmPipelineBenchmark.RunAsync(
+        ResolveInputPath(manifestPath), outputPath, CancellationToken.None);
+    foreach (var summary in report.PresetSummaries)
+        Console.WriteLine($"{summary.PresetId}: median/p95={summary.GlobalMedianMilliseconds:F0}/{summary.GlobalP95Milliseconds:F0} ms, prompt={summary.MedianPromptTokens:F0}");
+    Console.WriteLine($"Sequence cases: {report.SequenceResults.Count(item => item.Passed)}/{report.SequenceResults.Count}");
+    if (report.MissingCoverageTags.Count > 0)
+        Console.WriteLine($"Missing coverage: {string.Join(", ", report.MissingCoverageTags)}");
+    Console.WriteLine($"Report: {Path.GetFullPath(outputPath)}");
+    return report.MissingCoverageTags.Count == 0 && report.SequenceResults.All(item => item.Passed) &&
+        report.SnapshotRuns.All(item => item.QualityPassed) ? 0 : 10;
+}
+
+static async Task<int> GamePlanContractReportAsync(string manifestPath, string outputPath)
+{
+    var report = await GamePlanContractBenchmark.RunAsync(
+        ResolveInputPath(manifestPath), outputPath, CancellationToken.None);
+    foreach (var summary in report.Summaries)
+        Console.WriteLine($"{summary.ContractId}/{summary.Scope}: completion={summary.MedianCompletionTokens:F0}, decode={summary.MedianPredictedMilliseconds:F0} ms, E2E={summary.MedianEndToEndMilliseconds:F0} ms");
+    if (report.MissingCoverageTags.Count > 0)
+        Console.WriteLine($"Missing coverage: {string.Join(", ", report.MissingCoverageTags)}");
+    Console.WriteLine($"Promotion eligible: {report.Promotion.Eligible}");
+    Console.WriteLine($"Report: {Path.GetFullPath(outputPath)}");
+    return report.Promotion.Eligible ? 0 : 12;
 }
 
 static async Task<int> VlmImageAsync(string imagePath)
@@ -324,10 +386,12 @@ static async Task<int> VlmImageAsync(string imagePath)
     return result.Plan.VisualDecision is null ? 9 : 0;
 }
 
-static async Task<int> PlanSmokeAsync()
+static async Task<int> PlanSmokeAsync(string? contractId = null)
 {
     var now = DateTimeOffset.UtcNow;
     var settings = new AppSettings();
+    if (!string.IsNullOrWhiteSpace(contractId)) settings.GamePlanContractId = contractId;
+    settings.Validate();
     using var planner = new LlamaServerPlanner(settings);
     var state = new GameState
     {
@@ -345,7 +409,12 @@ static async Task<int> PlanSmokeAsync()
     var context = new SituationContext(state, GameHistorySummarizer.Summarize(history, TimeSpan.FromSeconds(120), now),
         map, null, [new PlanningEvent("smoke_test", "固定島嶼經濟案例", now)], now);
     var result = await planner.PlanAsync(context, CancellationToken.None);
-    if (!result.Success) { Console.Error.WriteLine(result.Error); return 7; }
+    if (!result.Success)
+    {
+        Console.Error.WriteLine(result.Error);
+        Console.Error.WriteLine(planner.LastRawResponse);
+        return 7;
+    }
     Console.WriteLine(JsonSerializer.Serialize(result.Plan, new JsonSerializerOptions { WriteIndented = true, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } }));
     return 0;
 }
